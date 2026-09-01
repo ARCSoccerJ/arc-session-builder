@@ -1146,7 +1146,7 @@
 
     teamBar.classList.remove('hidden');
 
-    if(!libUnlocked){
+    if(!libUnlocked && !fb.currentUser){
       passGate.classList.remove('hidden');
       dividerTop.classList.add('hidden');
       content.classList.add('hidden');
