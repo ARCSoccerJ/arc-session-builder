@@ -137,6 +137,8 @@
     --gate-blue:#3EA6E0;
     --attack:#F2994A;
     --defense:#3E7CB1;
+    --player-3:#9B6BC7;
+    --player-4:#D9628F;
     --cone:#FFB020;
     --danger:#E0533F;
   }
@@ -215,6 +217,7 @@
   #pitch.select-cursor{cursor:default;}
   #pitch.delete-cursor{cursor:not-allowed;}
   #pitch.rotate-cursor{cursor:grab;}
+  #pitch.foot-cursor{cursor:pointer;}
 
   /* sidebar */
   aside{
@@ -419,8 +422,8 @@
     <div class="tool-group" id="toolGroup">
       <button class="tool-btn active" data-tool="select">Move<span class="hotkey">M</span></button>
       <button class="tool-btn" data-tool="rotate">Rotate<span class="hotkey">R</span></button>
-      <button class="tool-btn" data-tool="attacker"><span class="swatch attack"></span>Attacker<span class="hotkey">A</span></button>
-      <button class="tool-btn" data-tool="defender"><span class="swatch defense"></span>Defender<span class="hotkey">D</span></button>
+      <button class="tool-btn" data-tool="foot">Foot<span class="hotkey">F</span></button>
+      <button class="tool-btn" data-tool="player">Player<span class="hotkey">P</span></button>
       <button class="tool-btn" data-tool="ball"><span class="swatch ball"></span>Ball<span class="hotkey">B</span></button>
       <button class="tool-btn" data-tool="cone"><span class="swatch cone"></span>Cone<span class="hotkey">C</span></button>
       <button class="tool-btn" data-tool="delete">Delete<span class="hotkey">Del</span></button>
@@ -493,16 +496,20 @@
       <div class="divider"></div>
 
       <div class="hint">
-        Pick a tool, then click the pitch to place tokens — new attackers and defenders face the
-        ball's starting spot by default. Use <b>Rotate</b> and drag a player to change which way
-        they're facing. <b>Add a step</b> to copy the current positions, drag tokens to their next
-        spot, then hit <b>Play</b> to watch the drill run. <b>Reset ball</b> snaps the ball on this
-        step back to bottom-center, without touching your other steps. Click a gate on the
+        Pick a tool, then click the pitch to place tokens — new players face the ball's starting
+        spot by default, and each of the first 4 on a step gets its own color. Use <b>Rotate</b>
+        and drag a player to change which way they're facing, and <b>Foot</b> then click a player's
+        foot to mark which one they should receive with — click it again to clear it. Drop the
+        ball onto a player's foot and it sticks there, following that player as you move or rotate
+        them, until you grab the ball again with <b>Move</b>. <b>Add a step</b> to copy the current
+        positions, drag tokens to their next spot, then hit <b>Play</b> to watch the drill run.
+        <b>Reset ball</b> snaps the ball on this step back to bottom-center and clears its gate
+        colors and receiving-foot marks, without touching your other steps. Click a gate on the
         boundary to cycle it through yellow, green, blue, and off — gate colors are saved per
-        step, so they can change as the drill progresses. The <b>Session</b> fields above name the
-        drill and record its type, focus, tags, gate timing, gates selected, and notes — this shows
-        in a panel beside the pitch throughout any exported GIF. Every exported GIF is also saved to
-        your <b>Library</b>, where you can tag it and filter by tag.
+        step, so they can change as the drill progresses. The <b>Session</b> fields above name the drill and record its type, focus,
+        tags, gate timing, gates selected, and notes — this shows in a panel beside the pitch
+        throughout any exported GIF. Every exported GIF is also saved to your <b>Library</b>,
+        where you can tag it and filter by tag.
       </div>
     </aside>
   </main>
@@ -657,15 +664,18 @@
 
   const colors = {
     attack: getVar('--attack'), defense: getVar('--defense'),
+    player3: getVar('--player-3'), player4: getVar('--player-4'),
     cone: getVar('--cone'), chalk: getVar('--chalk'), board:getVar('--board'),
     yellow: getVar('--yellow'), green: getVar('--gate-green'), blue: getVar('--gate-blue')
   };
+  const PLAYER_COLORS = [colors.attack, colors.defense, colors.player3, colors.player4];
+  const MAX_PLAYERS = 4;
   function getVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 
   let state = {
     steps: [ { objects: [], gates: new Array(gatePositions.length).fill('off') } ],
     currentStep: 0,
-    nextAttacker: 1, nextDefender: 1, nextCone: 1, nextBall: 1,
+    nextPlayer: 1, nextCone: 1, nextBall: 1,
     tool: 'select',
     showRuns: true,
     loop: false,
@@ -686,6 +696,18 @@
   function angleToward(fromX, fromY, toX, toY){
     return Math.atan2(toX-fromX, -(toY-fromY));
   }
+  function rotatePoint(lx, ly, theta){
+    const c = Math.cos(theta), s = Math.sin(theta);
+    return { x: lx*c - ly*s, y: lx*s + ly*c };
+  }
+  // feet overlap the shoulders now, widened and attached to the body;
+  // positions are in the player's own left/right (rotates with them)
+  function footWorldPositions(o){
+    const rot = o.rotation || 0;
+    const L = rotatePoint(-6, -2, rot);
+    const R = rotatePoint(6, -2, rot);
+    return { left: {x:o.x+L.x, y:o.y+L.y}, right: {x:o.x+R.x, y:o.y+R.y} };
+  }
   function ballStartPosition(){
     const firstStep = state.steps[0];
     const b = firstStep && firstStep.objects.find(o=>o.type==='ball');
@@ -693,16 +715,22 @@
   }
   function addObject(type, x, y){
     let obj;
-    if(type==='attacker' || type==='defender'){
+    if(type==='player'){
+      const existingCount = currentObjects().filter(o=>o.type==='player').length;
+      if(existingCount >= MAX_PLAYERS){
+        flash('Maximum of ' + MAX_PLAYERS + ' players per step.');
+        return;
+      }
       const bp = ballStartPosition();
       const rotation = angleToward(x, y, bp.x, bp.y);
-      if(type==='attacker') obj = {id:'A'+state.nextAttacker, type, x, y, label:String(state.nextAttacker++), color:colors.attack, rotation};
-      else obj = {id:'D'+state.nextDefender, type, x, y, label:String(state.nextDefender++), color:colors.defense, rotation};
+      const color = PLAYER_COLORS[existingCount % PLAYER_COLORS.length];
+      obj = {id:'P'+state.nextPlayer, type, x, y, label:String(state.nextPlayer++), color, rotation, receivingFoot:null};
     }
     else if(type==='cone') obj = {id:'C'+state.nextCone++, type, x, y, label:'', color:colors.cone};
-    else if(type==='ball') obj = {id:'B'+state.nextBall++, type, x, y, label:'', color:'#fff'};
+    else if(type==='ball') obj = {id:'B'+state.nextBall++, type, x, y, label:'', color:'#fff', attachedTo:null};
     else return;
     state.steps[state.currentStep].objects.push(obj);
+    if(type==='ball') tryAttachBall(obj);
     render();
   }
 
@@ -743,6 +771,34 @@
     };
   }
 
+  const FOOT_SNAP_RADIUS = 14;
+  function tryAttachBall(ball){
+    const players = currentObjects().filter(o=>o.type==='player');
+    let best=null, bestSide=null, bestDist=FOOT_SNAP_RADIUS;
+    players.forEach(p=>{
+      const feet = footWorldPositions(p);
+      const dL = Math.hypot(feet.left.x-ball.x, feet.left.y-ball.y);
+      const dR = Math.hypot(feet.right.x-ball.x, feet.right.y-ball.y);
+      if(dL<=bestDist){ bestDist=dL; best=p; bestSide='left'; }
+      if(dR<=bestDist){ bestDist=dR; best=p; bestSide='right'; }
+    });
+    if(best){
+      ball.attachedTo = { playerId: best.id, foot: bestSide };
+      const pos = footWorldPositions(best)[bestSide];
+      ball.x = pos.x; ball.y = pos.y;
+      return true;
+    }
+    return false;
+  }
+  function syncAttachedBalls(player){
+    currentObjects().forEach(o=>{
+      if(o.type==='ball' && o.attachedTo && o.attachedTo.playerId===player.id){
+        const pos = footWorldPositions(player)[o.attachedTo.foot];
+        o.x = pos.x; o.y = pos.y;
+      }
+    });
+  }
+
   let rotateId = null;
   canvas.addEventListener('pointerdown', (e)=>{
     if(playing) return;
@@ -752,13 +808,35 @@
     const objs = currentObjects();
     if(state.tool==='select'){
       const hit = hitTest(objs, x, y);
-      if(hit){ dragId = hit.id; dragDX = hit.x-x; dragDY = hit.y-y; canvas.setPointerCapture(e.pointerId); }
+      if(hit){
+        if(hit.type==='ball' && hit.attachedTo) hit.attachedTo = null; // picking it up detaches it
+        dragId = hit.id; dragDX = hit.x-x; dragDY = hit.y-y; canvas.setPointerCapture(e.pointerId);
+      }
     } else if(state.tool==='rotate'){
-      const hit = hitTest(objs.filter(o=>o.type==='attacker'||o.type==='defender'), x, y);
-      if(hit){ rotateId = hit.id; setRotationToward(hit, x, y); canvas.setPointerCapture(e.pointerId); render(); }
+      const hit = hitTest(objs.filter(o=>o.type==='player'), x, y);
+      if(hit){ rotateId = hit.id; setRotationToward(hit, x, y); syncAttachedBalls(hit); canvas.setPointerCapture(e.pointerId); render(); }
+    } else if(state.tool==='foot'){
+      const players = objs.filter(o=>o.type==='player');
+      let best = null, bestSide = null, bestDist = 14;
+      players.forEach(o=>{
+        const feet = footWorldPositions(o);
+        const dL = Math.hypot(feet.left.x-x, feet.left.y-y);
+        const dR = Math.hypot(feet.right.x-x, feet.right.y-y);
+        if(dL <= bestDist){ bestDist = dL; best = o; bestSide = 'left'; }
+        if(dR <= bestDist){ bestDist = dR; best = o; bestSide = 'right'; }
+      });
+      if(best){ best.receivingFoot = (best.receivingFoot === bestSide) ? null : bestSide; render(); }
     } else if(state.tool==='delete'){
       const hit = hitTest(objs, x, y);
-      if(hit){ state.steps[state.currentStep].objects = objs.filter(o=>o.id!==hit.id); render(); }
+      if(hit){
+        state.steps[state.currentStep].objects = objs.filter(o=>o.id!==hit.id);
+        if(hit.type==='player'){
+          state.steps[state.currentStep].objects.forEach(o=>{
+            if(o.type==='ball' && o.attachedTo && o.attachedTo.playerId===hit.id) o.attachedTo = null;
+          });
+        }
+        render();
+      }
     } else {
       if(x>=PX-20 && x<=PX+PW+20 && y>=PY-20 && y<=PY+PH+20){
         addObject(state.tool, Math.round(x), Math.round(y));
@@ -773,14 +851,24 @@
     const {x,y} = toCanvasCoords(e);
     if(rotateId){
       const obj = currentObjects().find(o=>o.id===rotateId);
-      if(obj){ setRotationToward(obj, x, y); render(); }
+      if(obj){ setRotationToward(obj, x, y); syncAttachedBalls(obj); render(); }
       return;
     }
     if(!dragId) return;
     const obj = currentObjects().find(o=>o.id===dragId);
-    if(obj){ obj.x = clamp(x+dragDX, PX-25, PX+PW+25); obj.y = clamp(y+dragDY, PY-25, PY+PH+25); render(); }
+    if(obj){
+      obj.x = clamp(x+dragDX, PX-25, PX+PW+25); obj.y = clamp(y+dragDY, PY-25, PY+PH+25);
+      if(obj.type==='player') syncAttachedBalls(obj);
+      render();
+    }
   });
-  window.addEventListener('pointerup', ()=>{ dragId=null; rotateId=null; });
+  window.addEventListener('pointerup', ()=>{
+    if(dragId){
+      const obj = currentObjects().find(o=>o.id===dragId);
+      if(obj && obj.type==='ball'){ tryAttachBall(obj); render(); }
+    }
+    dragId=null; rotateId=null;
+  });
   function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 
   // ---------- toolbar ----------
@@ -790,16 +878,16 @@
     canvas.classList.toggle('select-cursor', tool==='select');
     canvas.classList.toggle('delete-cursor', tool==='delete');
     canvas.classList.toggle('rotate-cursor', tool==='rotate');
+    canvas.classList.toggle('foot-cursor', tool==='foot');
   }
   document.getElementById('toolGroup').addEventListener('click',(e)=>{
     const btn = e.target.closest('.tool-btn');
     if(!btn) return;
     selectTool(btn.dataset.tool);
   });
-  // keyboard shortcuts: M move, R rotate, A attacker, D defender, B ball,
-  // C cone. Delete uses the Delete/Backspace key since D is already taken
-  // by Defender.
-  const TOOL_HOTKEYS = { m:'select', r:'rotate', a:'attacker', d:'defender', b:'ball', c:'cone' };
+  // keyboard shortcuts: M move, R rotate, F foot, P player, B ball, C cone.
+  // Delete uses the Delete/Backspace key.
+  const TOOL_HOTKEYS = { m:'select', r:'rotate', f:'foot', p:'player', b:'ball', c:'cone' };
   window.addEventListener('keydown', (e)=>{
     if(playing || exporting) return;
     if(e.ctrlKey || e.metaKey || e.altKey) return;
@@ -845,9 +933,12 @@
   };
   document.getElementById('resetDrillBtn').onclick = ()=>{
     if(playing || exporting) return;
-    state.steps[state.currentStep].objects = currentObjects().filter(o=>o.type!=='ball');
+    const step = state.steps[state.currentStep];
+    step.objects = step.objects.filter(o=>o.type!=='ball');
+    step.objects.forEach(o=>{ if(o.type==='player') o.receivingFoot = null; });
+    step.gates = new Array(gatePositions.length).fill('off');
     addObject('ball', CX, PY+PH-16);
-    flash('Ball reset to bottom-center.');
+    flash('Ball reset, gates cleared, receiving feet cleared.');
   };
 
   // ---------- session settings ----------
@@ -1601,7 +1692,7 @@
       to.forEach(o=>{
         const prev = from.find(p=>p.id===o.id);
         if(prev && (prev.x!==o.x || prev.y!==o.y)){
-          drawArrow(prev.x, prev.y, o.x, o.y, o.type==='attacker'?colors.attack:o.type==='defender'?colors.defense:colors.yellow, 0.55);
+          drawArrow(prev.x, prev.y, o.x, o.y, o.type==='player' ? o.color : colors.yellow, 0.55);
         }
       });
     }
@@ -1646,6 +1737,29 @@
         ctx.translate(o.x, o.y);
         ctx.rotate(rot);
 
+        // feet: widened, and positioned to overlap the shoulders so the body
+        // (drawn next) covers the seam — same attached look as before, now
+        // up front. The receiving foot (if any) is highlighted.
+        [['left',-6],['right',6]].forEach(([side,fx])=>{
+          const lit = o.receivingFoot === side;
+          ctx.save();
+          ctx.translate(fx, -2);
+          ctx.rotate(fx<0 ? 0.16 : -0.16);
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 4.5, 6, 0, 0, Math.PI*2);
+          if(lit){
+            ctx.shadowColor = colors.yellow; ctx.shadowBlur = 6;
+            ctx.fillStyle = colors.yellow;
+          } else {
+            ctx.fillStyle = 'rgba(244,237,225,0.55)';
+          }
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+          ctx.stroke();
+          ctx.restore();
+        });
+
         // body: wide at the shoulders (front, near the head) tapering to
         // narrower hips at the back — the silhouette itself shows which way
         // the player is facing, no separate arrow needed
@@ -1662,9 +1776,10 @@
         ctx.fillStyle = o.color; ctx.fill();
         ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke();
 
-        // head: skin-tone circle overlapping the top of the body, split
+        // head: skin-tone circle sitting on the shoulders (mostly overlapping
+        // the body now that the feet carry the facing-direction cue), split
         // top/bottom into two shades, with its own white outline
-        const hx=0, hy=-3, hr=8;
+        const hx=0, hy=4, hr=7.5;
         ctx.save();
         ctx.beginPath(); ctx.arc(hx,hy,hr,0,Math.PI*2); ctx.clip();
         ctx.fillStyle = '#DEC29E'; ctx.fillRect(hx-hr, hy-hr, hr*2, hr);
@@ -1674,11 +1789,7 @@
         ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke();
 
         ctx.restore();
-        // number stays upright regardless of facing
-        ctx.fillStyle = '#fff';
-        ctx.font = "600 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
-        ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText(o.label, o.x, o.y+8);
+        // labels are hidden for now — o.label is still tracked internally
       }
       ctx.restore();
     });
@@ -1709,9 +1820,9 @@
 
   // seed a tiny example so the board isn't blank
   (function seed(){
-    addObject('attacker', PX+120, CY);
+    addObject('player', PX+120, CY);
     state.steps[0].objects[state.steps[0].objects.length-1].x = PX+120;
-    addObject('defender', PX+220, CY-40);
+    addObject('player', PX+220, CY-40);
     addObject('ball', PX+90, CY);
   })();
 
