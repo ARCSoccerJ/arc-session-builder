@@ -1131,6 +1131,10 @@
 
     const actions = document.createElement('div');
     actions.className = 'library-item-actions';
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'lib-action-btn'; viewBtn.type = 'button'; viewBtn.textContent = 'View';
+    viewBtn.onclick = opts.onView;
+    actions.appendChild(viewBtn);
     const dlBtn = document.createElement('button');
     dlBtn.className = 'lib-action-btn'; dlBtn.type = 'button'; dlBtn.textContent = opts.downloadLabel || 'Download';
     dlBtn.onclick = opts.onDownload;
@@ -1192,6 +1196,10 @@
         canEdit,
         canDelete: canEdit,
         downloadLabel: 'Download',
+        onView: ()=>{
+          const url = rec.blob ? URL.createObjectURL(rec.blob) : rec.url;
+          window.open(url, '_blank');
+        },
         onDownload: async ()=>{
           if(rec.blob){ libDownloadBlob(rec); return; }
           try{
