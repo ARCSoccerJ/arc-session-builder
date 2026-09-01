@@ -22,6 +22,95 @@
     document.body ? document.body.appendChild(el) : window.addEventListener('DOMContentLoaded', function(){ document.body.appendChild(el); });
   });
 </script>
+<script type="module">
+  // Shared cloud library: team members sign in with real Firebase accounts to
+  // push sessions in; the passphrase gate in the main app controls customer
+  // read access. This whole block degrades gracefully — if firebaseConfig
+  // below is still the placeholder, window.ArcFirebase reports
+  // configured:false and every shared-library feature is skipped, falling
+  // back to the browser-local library instead. Nothing here is required for
+  // the board itself to work.
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js';
+  import {
+    getAuth, signInWithEmailAndPassword, signOut as fbSignOut, onAuthStateChanged
+  } from 'https://www.gstatic.com/firebasejs/12.9.0/firebase-auth.js';
+  import {
+    getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc
+  } from 'https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js';
+  import {
+    getStorage, ref, uploadBytes, getDownloadURL, deleteObject
+  } from 'https://www.gstatic.com/firebasejs/12.9.0/firebase-storage.js';
+
+  // TODO: replace with your own Firebase project's config
+  // (Firebase console -> Project settings -> General -> Your apps -> Web app)
+  const firebaseConfig = {
+    apiKey: "AIzaSyAcB8ep7D2uLKKGchSqzFM098OYSaZtNGQ",
+    authDomain: "arc-session-library.firebaseapp.com",
+    projectId: "arc-session-library",
+    storageBucket: "arc-session-library.firebasestorage.app",
+    messagingSenderId: "140009762686",
+    appId: "1:140009762686:web:d4dedbe3f7800d56eb4d2f"
+  };
+  const isConfigured = !Object.values(firebaseConfig).some(v => String(v).indexOf('YOUR_') === 0);
+
+  const api = { configured: isConfigured, currentUser: null, _authListeners: [] };
+
+  if(isConfigured){
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const storage = getStorage(app);
+    const SESSIONS = collection(db, 'sessions');
+
+    onAuthStateChanged(auth, user=>{
+      api.currentUser = user;
+      api._authListeners.forEach(fn=>fn(user));
+    });
+
+    api.onAuthChange = (fn)=>{ api._authListeners.push(fn); fn(api.currentUser); };
+    api.signIn = (email, password)=> signInWithEmailAndPassword(auth, email, password);
+    api.signOut = ()=> fbSignOut(auth);
+
+    api.saveSession = async ({name, tags, blob})=>{
+      if(!auth.currentUser) throw new Error('Not signed in');
+      const path = 'gifs/' + Date.now() + '_' + Math.random().toString(36).slice(2,8) + '.gif';
+      const fileRef = ref(storage, path);
+      await uploadBytes(fileRef, blob, {contentType:'image/gif'});
+      const url = await getDownloadURL(fileRef);
+      await addDoc(SESSIONS, {
+        name: name || 'Untitled drill',
+        tags: tags || [],
+        url, storagePath: path,
+        createdAt: Date.now(),
+        createdBy: auth.currentUser.email
+      });
+    };
+    api.fetchSessions = async ()=>{
+      const snap = await getDocs(SESSIONS);
+      return snap.docs.map(d=>({ id:d.id, ...d.data() }));
+    };
+    api.updateTags = async (id, tags)=>{
+      if(!auth.currentUser) throw new Error('Not signed in');
+      await updateDoc(doc(db,'sessions',id), { tags });
+    };
+    api.deleteSession = async (id, storagePath)=>{
+      if(!auth.currentUser) throw new Error('Not signed in');
+      await deleteDoc(doc(db,'sessions',id));
+      if(storagePath){ try{ await deleteObject(ref(storage, storagePath)); }catch(e){} }
+    };
+  } else {
+    api.onAuthChange = (fn)=>{ fn(null); };
+    api.signIn = ()=> Promise.reject(new Error('Shared library is not configured yet.'));
+    api.signOut = ()=> Promise.resolve();
+    api.saveSession = ()=> Promise.reject(new Error('Shared library is not configured yet.'));
+    api.fetchSessions = ()=> Promise.resolve([]);
+    api.updateTags = ()=> Promise.reject(new Error('Shared library is not configured yet.'));
+    api.deleteSession = ()=> Promise.reject(new Error('Shared library is not configured yet.'));
+  }
+
+  window.ArcFirebase = api;
+  window.dispatchEvent(new Event('arc-firebase-ready'));
+</script>
 <script>
 // gif.js 0.2.0 (bundled inline for offline use) - https://github.com/jnordberg/gif.js
 /**
@@ -113,6 +202,13 @@
   }
   #sessionBtn:hover{border-color:var(--yellow);color:var(--yellow);}
   #sessionBtn:disabled{opacity:.5;cursor:not-allowed;}
+  #libraryBtn{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:16px;letter-spacing:0.4px;font-weight:600;
+    background:transparent;color:var(--chalk);border:1px solid var(--board-line);
+    padding:7px 14px;border-radius:8px;cursor:pointer;text-transform:uppercase;
+  }
+  #libraryBtn:hover{border-color:var(--yellow);color:var(--yellow);}
+  #libraryBtn:disabled{opacity:.5;cursor:not-allowed;}
   .speed-wrap{display:flex;flex-direction:column;gap:2px;min-width:110px;}
   .speed-wrap label{font-size:11px;color:var(--chalk-dim);text-transform:uppercase;letter-spacing:.06em;}
   input[type=range]{width:110px;accent-color:var(--yellow);}
@@ -177,6 +273,7 @@
     background:var(--board-raised);border:1px solid var(--board-line);border-radius:12px;
     box-shadow:0 24px 60px rgba(0,0,0,0.5);
   }
+  .modal-wide{width:560px;}
   .modal-header{
     display:flex;align-items:center;justify-content:space-between;
     padding:14px 18px;border-bottom:1px solid var(--board-line);
@@ -224,6 +321,63 @@
     background:rgba(0,0,0,0.18);border:1px solid var(--board-line);border-radius:7px;
     padding:8px 16px;font-size:14px;flex:1;
   }
+
+  /* ---------- gif library ---------- */
+  .tag-filter-row{display:flex;flex-wrap:wrap;gap:6px;}
+  .tag-filter-chip{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:12.5px;font-weight:600;
+    background:rgba(0,0,0,0.2);border:1px solid var(--board-line);color:var(--chalk-dim);
+    padding:5px 12px;border-radius:999px;cursor:pointer;text-transform:none;
+  }
+  .tag-filter-chip:hover{border-color:var(--yellow);color:var(--chalk);}
+  .tag-filter-chip.active{background:var(--yellow);border-color:var(--yellow);color:var(--board);}
+  .library-list{display:flex;flex-direction:column;gap:10px;margin-top:4px;}
+  .lib-empty{color:var(--chalk-dim);font-size:13px;padding:14px 2px;}
+  .library-item{
+    background:rgba(0,0,0,0.16);border:1px solid var(--board-line);border-radius:9px;
+    padding:12px 14px;display:flex;flex-direction:column;gap:8px;
+  }
+  .library-item-main{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}
+  .library-item-name{color:var(--chalk);font-weight:600;font-size:14.5px;}
+  .library-item-date{color:var(--chalk-dim);font-size:11.5px;white-space:nowrap;}
+  .library-item-tags{display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
+  .tag-chip{
+    display:inline-flex;align-items:center;gap:5px;
+    background:rgba(232,184,74,0.14);border:1px solid rgba(232,184,74,0.4);color:var(--chalk);
+    font-size:12px;padding:3px 4px 3px 10px;border-radius:999px;
+  }
+  .tag-remove{
+    background:transparent;border:none;color:var(--chalk-dim);cursor:pointer;
+    font-size:13px;line-height:1;padding:2px 6px;border-radius:999px;
+  }
+  .tag-remove:hover{color:var(--danger);background:rgba(224,83,63,0.15);}
+  .tag-input{
+    background:transparent;border:1px dashed var(--board-line);border-radius:999px;
+    color:var(--chalk);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:12px;
+    padding:4px 10px;width:90px;
+  }
+  .tag-input:focus{outline:none;border-color:var(--yellow);width:130px;}
+  .tag-input::placeholder{color:rgba(244,237,225,0.35);}
+  .library-item-actions{display:flex;gap:8px;}
+  .lib-action-btn{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:12px;font-weight:600;
+    background:transparent;border:1px solid var(--board-line);color:var(--chalk-dim);
+    padding:5px 12px;border-radius:7px;cursor:pointer;text-transform:uppercase;
+  }
+  .lib-action-btn:hover{border-color:var(--yellow);color:var(--chalk);}
+  .lib-action-danger:hover{border-color:var(--danger);color:var(--danger);}
+  .lib-team-bar{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+  .lib-auth-status{font-size:12px;color:var(--chalk-dim);flex:1;}
+  .lib-link-btn{
+    background:transparent;border:none;color:var(--yellow);cursor:pointer;
+    font-size:12px;font-weight:600;padding:2px 0;text-decoration:underline;
+  }
+  .lib-team-login{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;}
+  .lib-team-login .text-input{width:auto;flex:1;min-width:140px;}
+  .lib-pass-gate{padding:6px 2px 14px;}
+  .lib-pass-row{display:flex;gap:8px;}
+  .lib-pass-row .text-input{flex:1;}
+  .lib-pass-error{color:var(--danger);font-size:12px;margin-top:6px;min-height:15px;}
 
   /* ---------- mobile layout ---------- */
   @media (max-width: 760px){
@@ -284,6 +438,7 @@
       <button id="playBtn">▶ Play</button>
       <button id="sessionBtn">Session</button>
       <button id="exportBtn">Export GIF</button>
+      <button id="libraryBtn">Library</button>
     </div>
   </header>
   <main>
@@ -306,7 +461,8 @@
         boundary to cycle it through yellow, green, blue, and off — gate colors are saved per
         step, so they can change as the drill progresses. Use <b>Session</b> to name the drill and
         record its type, focus, gate timing, gates selected, and notes — this shows in a panel
-        beside the pitch throughout any exported GIF.
+        beside the pitch throughout any exported GIF. Every exported GIF is also saved to your
+        <b>Library</b>, where you can tag it and filter by tag — this is stored in this browser only.
       </div>
     </aside>
   </main>
@@ -360,6 +516,45 @@
     </div>
   </div>
 </div>
+<div id="libraryOverlay" class="modal-overlay hidden">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <div class="modal-title">GIF Library</div>
+      <button id="libraryCloseBtn" class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="libTeamBar" class="lib-team-bar hidden">
+        <span id="libAuthStatus" class="lib-auth-status">Not signed in</span>
+        <button id="libTeamLoginToggle" class="lib-link-btn" type="button">Team sign-in</button>
+        <button id="libTeamSignOutBtn" class="lib-link-btn hidden" type="button">Sign out</button>
+      </div>
+      <div id="libTeamLoginForm" class="lib-team-login hidden">
+        <input type="email" id="libTeamEmail" class="text-input" placeholder="Team email" autocomplete="username">
+        <input type="password" id="libTeamPassword" class="text-input" placeholder="Password" autocomplete="current-password">
+        <button id="libTeamSignInBtn" class="lib-action-btn" type="button">Sign in</button>
+        <div id="libTeamError" class="lib-pass-error"></div>
+      </div>
+      <div id="libDividerTop" class="divider hidden"></div>
+
+      <div id="libPassGate" class="lib-pass-gate hidden">
+        <div class="field-label">Library passphrase</div>
+        <div class="lib-pass-row">
+          <input type="password" id="libPassInput" class="text-input" placeholder="Enter passphrase">
+          <button id="libPassUnlockBtn" class="lib-action-btn" type="button">Unlock</button>
+        </div>
+        <div id="libPassError" class="lib-pass-error"></div>
+      </div>
+
+      <div id="libContent">
+        <div class="field-label">Filter by tag</div>
+        <div class="tag-filter-row" id="tagFilterRow"></div>
+        <div class="divider"></div>
+        <div id="libraryList" class="library-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<datalist id="libraryTagSuggestions"></datalist>
 <div id="msg"></div>
 
 <script>
@@ -716,6 +911,335 @@
     r.addEventListener('change', (e)=>{ if(e.target.checked) state.session.gateTiming = e.target.value; });
   });
 
+  // ---------- gif library ----------
+  // Two modes: if the Firebase module above isn't configured yet, this
+  // behaves exactly as before (a browser-local library via IndexedDB). Once
+  // configured, it switches to a shared library: team members sign in to
+  // push sessions in, customers unlock read access with a passphrase.
+  const LIB_DB_NAME = 'arc-session-builder';
+  const LIB_STORE = 'gifs';
+  function libOpenDB(){
+    return new Promise((resolve,reject)=>{
+      if(!window.indexedDB){ reject(new Error('IndexedDB not available in this environment')); return; }
+      const req = indexedDB.open(LIB_DB_NAME, 1);
+      req.onupgradeneeded = ()=>{
+        const db = req.result;
+        if(!db.objectStoreNames.contains(LIB_STORE)){
+          db.createObjectStore(LIB_STORE, {keyPath:'id'});
+        }
+      };
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+  }
+  async function libSave(record){
+    const db = await libOpenDB();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(LIB_STORE,'readwrite');
+      tx.objectStore(LIB_STORE).put(record);
+      tx.oncomplete = ()=>resolve();
+      tx.onerror = ()=>reject(tx.error);
+    });
+  }
+  async function libGetAll(){
+    const db = await libOpenDB();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(LIB_STORE,'readonly');
+      const req = tx.objectStore(LIB_STORE).getAll();
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+  }
+  async function libDelete(id){
+    const db = await libOpenDB();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(LIB_STORE,'readwrite');
+      tx.objectStore(LIB_STORE).delete(id);
+      tx.oncomplete = ()=>resolve();
+      tx.onerror = ()=>reject(tx.error);
+    });
+  }
+
+  // Customer read access to the shared library. This is a lightweight
+  // deterrent (a hash comparison in client code), not real access control —
+  // it keeps the library from being casually stumbled on, but anyone who
+  // truly wants to bypass it technically could. Don't rely on it for
+  // sensitive content. Ask to have this passphrase changed anytime.
+  const LIBRARY_PASSPHRASE_HASH = '057ba03d6c44104863dc7361fe4578965d1887360f90a0895882e58a6248fc86'; // "changeme"
+  async function sha256Hex(str){
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+  function waitForFirebase(){
+    return new Promise(resolve=>{
+      if(window.ArcFirebase){ resolve(window.ArcFirebase); return; }
+      window.addEventListener('arc-firebase-ready', ()=>resolve(window.ArcFirebase), {once:true});
+      setTimeout(()=>resolve(window.ArcFirebase || null), 4000);
+    });
+  }
+
+  const libraryOverlay = document.getElementById('libraryOverlay');
+  let libraryFilterTag = null;
+  let libUnlocked = sessionStorage.getItem('arcLibraryUnlocked') === '1';
+
+  function libDownloadBlob(rec){
+    const url = URL.createObjectURL(rec.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (rec.name || 'drill').replace(/[^a-z0-9\-_]+/gi,'-') + '.gif';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+  }
+
+  function buildLibraryItem(rec, opts){
+    const item = document.createElement('div');
+    item.className = 'library-item';
+
+    const main = document.createElement('div');
+    main.className = 'library-item-main';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'library-item-name';
+    nameEl.textContent = rec.name || 'Untitled drill';
+    const dateEl = document.createElement('div');
+    dateEl.className = 'library-item-date';
+    dateEl.textContent = new Date(rec.createdAt).toLocaleString();
+    main.appendChild(nameEl); main.appendChild(dateEl);
+
+    const tagsWrap = document.createElement('div');
+    tagsWrap.className = 'library-item-tags';
+    (rec.tags||[]).forEach(tag=>{
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.appendChild(document.createTextNode(tag));
+      if(opts.canEdit){
+        const rm = document.createElement('button');
+        rm.className = 'tag-remove'; rm.textContent = '\u00d7'; rm.type = 'button';
+        rm.onclick = ()=> opts.onRemoveTag(tag);
+        chip.appendChild(rm);
+      }
+      tagsWrap.appendChild(chip);
+    });
+    if(opts.canEdit){
+      const tagInput = document.createElement('input');
+      tagInput.type = 'text'; tagInput.className = 'tag-input'; tagInput.placeholder = '+ tag';
+      tagInput.setAttribute('list','libraryTagSuggestions');
+      tagInput.addEventListener('keydown', (e)=>{
+        if(e.key !== 'Enter') return;
+        e.preventDefault();
+        const val = tagInput.value.trim();
+        if(val && !(rec.tags||[]).includes(val)){ opts.onAddTag(val); }
+        tagInput.value = '';
+      });
+      tagsWrap.appendChild(tagInput);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'library-item-actions';
+    const dlBtn = document.createElement('button');
+    dlBtn.className = 'lib-action-btn'; dlBtn.type = 'button'; dlBtn.textContent = opts.downloadLabel || 'Download';
+    dlBtn.onclick = opts.onDownload;
+    actions.appendChild(dlBtn);
+    if(opts.canDelete){
+      const delBtn = document.createElement('button');
+      delBtn.className = 'lib-action-btn lib-action-danger'; delBtn.type = 'button'; delBtn.textContent = 'Delete';
+      delBtn.onclick = opts.onDelete;
+      actions.appendChild(delBtn);
+    }
+
+    item.appendChild(main);
+    item.appendChild(tagsWrap);
+    item.appendChild(actions);
+    return item;
+  }
+
+  function renderTagUI(records, {canEdit}){
+    const listEl = document.getElementById('libraryList');
+    const filterRow = document.getElementById('tagFilterRow');
+    const suggestions = document.getElementById('libraryTagSuggestions');
+
+    const allTags = Array.from(new Set(records.flatMap(r=>r.tags||[]))).sort((a,b)=>a.localeCompare(b));
+    if(libraryFilterTag && !allTags.includes(libraryFilterTag)) libraryFilterTag = null;
+
+    suggestions.innerHTML = '';
+    allTags.forEach(tag=>{
+      const opt = document.createElement('option');
+      opt.value = tag;
+      suggestions.appendChild(opt);
+    });
+
+    filterRow.innerHTML = '';
+    const allChip = document.createElement('button');
+    allChip.type = 'button';
+    allChip.className = 'tag-filter-chip' + (libraryFilterTag===null ? ' active' : '');
+    allChip.textContent = 'All';
+    allChip.onclick = ()=>{ libraryFilterTag = null; renderLibrary(); };
+    filterRow.appendChild(allChip);
+    allTags.forEach(tag=>{
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'tag-filter-chip' + (libraryFilterTag===tag ? ' active' : '');
+      chip.textContent = tag;
+      chip.onclick = ()=>{ libraryFilterTag = (libraryFilterTag===tag ? null : tag); renderLibrary(); };
+      filterRow.appendChild(chip);
+    });
+
+    const visible = libraryFilterTag ? records.filter(r=>(r.tags||[]).includes(libraryFilterTag)) : records;
+    listEl.innerHTML = '';
+    if(visible.length===0){
+      listEl.innerHTML = '<div class="lib-empty">' +
+        (records.length===0 ? 'No GIFs saved yet — export one to add it here.' : 'No GIFs with that tag.') +
+        '</div>';
+      return;
+    }
+    visible.forEach(rec=>{
+      const item = buildLibraryItem(rec, {
+        canEdit,
+        canDelete: canEdit,
+        downloadLabel: rec.blob ? 'Download' : 'Open',
+        onDownload: ()=> rec.blob ? libDownloadBlob(rec) : window.open(rec.url, '_blank'),
+        onAddTag: async (val)=>{
+          rec.tags = [...(rec.tags||[]), val];
+          if(rec.blob) await libSave(rec); else await window.ArcFirebase.updateTags(rec.id, rec.tags);
+          renderLibrary();
+        },
+        onRemoveTag: async (tag)=>{
+          rec.tags = (rec.tags||[]).filter(t=>t!==tag);
+          if(rec.blob) await libSave(rec); else await window.ArcFirebase.updateTags(rec.id, rec.tags);
+          renderLibrary();
+        },
+        onDelete: async ()=>{
+          if(rec.blob) await libDelete(rec.id); else await window.ArcFirebase.deleteSession(rec.id, rec.storagePath);
+          renderLibrary();
+        }
+      });
+      listEl.appendChild(item);
+    });
+  }
+
+  async function renderLibrary(){
+    const teamBar = document.getElementById('libTeamBar');
+    const passGate = document.getElementById('libPassGate');
+    const dividerTop = document.getElementById('libDividerTop');
+    const content = document.getElementById('libContent');
+    const listEl = document.getElementById('libraryList');
+    const filterRow = document.getElementById('tagFilterRow');
+
+    const fb = await waitForFirebase();
+
+    if(!fb || !fb.configured){
+      // shared library not set up yet — fall back to this browser's local library
+      teamBar.classList.add('hidden');
+      passGate.classList.add('hidden');
+      dividerTop.classList.add('hidden');
+      content.classList.remove('hidden');
+      let records;
+      try{ records = await libGetAll(); }
+      catch(err){
+        filterRow.innerHTML = '';
+        listEl.innerHTML = '<div class="lib-empty">Saved GIFs aren\'t available in this browser/environment.</div>';
+        return;
+      }
+      records.sort((a,b)=>b.createdAt-a.createdAt);
+      renderTagUI(records, {canEdit:true});
+      return;
+    }
+
+    teamBar.classList.remove('hidden');
+
+    if(!libUnlocked){
+      passGate.classList.remove('hidden');
+      dividerTop.classList.add('hidden');
+      content.classList.add('hidden');
+      return;
+    }
+
+    passGate.classList.add('hidden');
+    dividerTop.classList.remove('hidden');
+    content.classList.remove('hidden');
+
+    let records;
+    try{
+      records = await fb.fetchSessions();
+    }catch(err){
+      filterRow.innerHTML = '';
+      listEl.innerHTML = '<div class="lib-empty">Could not reach the shared library right now.</div>';
+      return;
+    }
+    records.sort((a,b)=>b.createdAt-a.createdAt);
+    renderTagUI(records, {canEdit: !!fb.currentUser});
+  }
+
+  function updateAuthStatusUI(){
+    const fb = window.ArcFirebase;
+    const statusEl = document.getElementById('libAuthStatus');
+    const signOutBtn = document.getElementById('libTeamSignOutBtn');
+    const loginToggle = document.getElementById('libTeamLoginToggle');
+    if(fb && fb.currentUser){
+      statusEl.textContent = 'Signed in as ' + fb.currentUser.email;
+      signOutBtn.classList.remove('hidden');
+      loginToggle.classList.add('hidden');
+      document.getElementById('libTeamLoginForm').classList.add('hidden');
+    } else {
+      statusEl.textContent = 'Not signed in';
+      signOutBtn.classList.add('hidden');
+      loginToggle.classList.remove('hidden');
+    }
+  }
+
+  document.getElementById('libTeamLoginToggle').onclick = ()=>{
+    document.getElementById('libTeamLoginForm').classList.toggle('hidden');
+  };
+  document.getElementById('libTeamSignInBtn').onclick = async ()=>{
+    const email = document.getElementById('libTeamEmail').value.trim();
+    const password = document.getElementById('libTeamPassword').value;
+    const errEl = document.getElementById('libTeamError');
+    errEl.textContent = '';
+    try{
+      const fb = await waitForFirebase();
+      await fb.signIn(email, password);
+      document.getElementById('libTeamPassword').value = '';
+      updateAuthStatusUI();
+      renderLibrary();
+    }catch(err){
+      errEl.textContent = err.message || 'Sign-in failed.';
+    }
+  };
+  document.getElementById('libTeamSignOutBtn').onclick = async ()=>{
+    const fb = await waitForFirebase();
+    await fb.signOut();
+    updateAuthStatusUI();
+    renderLibrary();
+  };
+  document.getElementById('libPassUnlockBtn').onclick = async ()=>{
+    const val = document.getElementById('libPassInput').value;
+    const errEl = document.getElementById('libPassError');
+    const hash = await sha256Hex(val);
+    if(hash === LIBRARY_PASSPHRASE_HASH){
+      libUnlocked = true;
+      sessionStorage.setItem('arcLibraryUnlocked','1');
+      errEl.textContent = '';
+      document.getElementById('libPassInput').value = '';
+      renderLibrary();
+    } else {
+      errEl.textContent = 'Incorrect passphrase.';
+    }
+  };
+  document.getElementById('libPassInput').addEventListener('keydown', (e)=>{
+    if(e.key==='Enter') document.getElementById('libPassUnlockBtn').click();
+  });
+
+  function openLibraryPanel(){
+    if(playing || exporting) return;
+    libraryOverlay.classList.remove('hidden');
+    updateAuthStatusUI();
+    renderLibrary();
+    waitForFirebase().then(fb=>{ if(fb) fb.onAuthChange(()=>{ updateAuthStatusUI(); }); });
+  }
+  function closeLibraryPanel(){ libraryOverlay.classList.add('hidden'); }
+  document.getElementById('libraryBtn').onclick = openLibraryPanel;
+  document.getElementById('libraryCloseBtn').onclick = closeLibraryPanel;
+  libraryOverlay.addEventListener('click', (e)=>{ if(e.target===libraryOverlay) closeLibraryPanel(); });
+
   // ---------- playback ----------
   let exporting = false;
   const playBtn = document.getElementById('playBtn');
@@ -741,6 +1265,7 @@
     });
     document.getElementById('exportBtn').disabled = !on;
     document.getElementById('sessionBtn').disabled = !on;
+    document.getElementById('libraryBtn').disabled = !on;
   }
   function easeInOutQuad(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
 
@@ -933,18 +1458,40 @@
         exportBtn.textContent = `Rendering ${Math.round(((seg+1)/segments)*100)}%`;
       }
       gif.on('progress', p=>{ exportBtn.textContent = `Encoding ${Math.round(p*100)}%`; });
-      gif.on('finished', blob=>{
+      gif.on('finished', async blob=>{
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url; a.download = 'arc-session-builder.gif';
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         setTimeout(()=>URL.revokeObjectURL(url), 4000);
+
+        let saveMsg = '';
+        try{
+          const fb = await waitForFirebase();
+          if(fb && fb.configured && fb.currentUser){
+            await fb.saveSession({ name: state.session.name, tags: [], blob });
+            saveMsg = 'GIF downloaded and pushed to the shared Library.';
+          } else {
+            await libSave({
+              id: 'gif_' + Date.now() + '_' + Math.random().toString(36).slice(2,8),
+              name: state.session.name || 'Untitled drill',
+              blob: blob, tags: [], createdAt: Date.now()
+            });
+            saveMsg = (fb && fb.configured)
+              ? 'GIF downloaded and saved locally — sign in under Library \u2192 Team sign-in to push it to the shared Library.'
+              : 'GIF downloaded and saved to your local Library.';
+          }
+        } catch(err){
+          console.error('Could not save to library:', err);
+          saveMsg = 'GIF downloaded (could not save to a Library right now).';
+        }
+
         exporting = false;
         playBtn.disabled = false;
         setControlsEnabled(true);
         exportBtn.textContent = originalLabel;
         render();
-        flash('GIF downloaded.');
+        flash(saveMsg);
       });
       gif.render();
     } catch(err){
