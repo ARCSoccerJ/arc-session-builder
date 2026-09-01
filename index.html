@@ -195,13 +195,6 @@
   }
   #exportBtn:hover{border-color:var(--yellow);color:var(--yellow);}
   #exportBtn:disabled{opacity:.5;cursor:not-allowed;}
-  #sessionBtn{
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:16px;letter-spacing:0.4px;font-weight:600;
-    background:transparent;color:var(--chalk);border:1px solid var(--board-line);
-    padding:7px 14px;border-radius:8px;cursor:pointer;text-transform:uppercase;
-  }
-  #sessionBtn:hover{border-color:var(--yellow);color:var(--yellow);}
-  #sessionBtn:disabled{opacity:.5;cursor:not-allowed;}
   #libraryBtn{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:16px;letter-spacing:0.4px;font-weight:600;
     background:transparent;color:var(--chalk);border:1px solid var(--board-line);
@@ -225,7 +218,7 @@
 
   /* sidebar */
   aside{
-    width:210px;flex:none;background:var(--board-raised);border-left:1px solid var(--board-line);
+    width:300px;flex:none;background:var(--board-raised);border-left:1px solid var(--board-line);
     display:flex;flex-direction:column;padding:14px;gap:10px;overflow-y:auto;
   }
   .side-title{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:18px;letter-spacing:.06em;color:var(--chalk-dim);text-transform:uppercase;margin:0 0 2px 2px;}
@@ -285,6 +278,7 @@
   }
   .modal-close:hover{color:var(--chalk);background:rgba(244,237,225,0.08);}
   .modal-body{padding:16px 18px 20px;display:flex;flex-direction:column;gap:4px;}
+  #sessionFieldsWrap{display:flex;flex-direction:column;gap:4px;}
   .field-label{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:14px;letter-spacing:.06em;text-transform:uppercase;
     color:var(--chalk-dim);margin:10px 0 5px;
@@ -341,6 +335,10 @@
   .library-item-name{color:var(--chalk);font-weight:600;font-size:14.5px;}
   .library-item-date{color:var(--chalk-dim);font-size:11.5px;white-space:nowrap;}
   .library-item-tags{display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
+  .tags-editor-standalone{
+    background:rgba(0,0,0,0.18);border:1px solid var(--board-line);border-radius:7px;
+    padding:8px 10px;min-height:20px;
+  }
   .tag-chip{
     display:inline-flex;align-items:center;gap:5px;
     background:rgba(232,184,74,0.14);border:1px solid rgba(232,184,74,0.4);color:var(--chalk);
@@ -388,7 +386,7 @@
     .tool-btn{font-size:13px;padding:7px 9px;gap:4px;}
     .hotkey{display:none;}
     .play-group{gap:8px;flex-wrap:wrap;}
-    #playBtn,#exportBtn,#sessionBtn{font-size:13px;padding:7px 11px;}
+    #playBtn,#exportBtn,#libraryBtn{font-size:13px;padding:7px 11px;}
     .speed-wrap{min-width:70px;}
     input[type=range]{width:70px;}
     .toggle{font-size:11px;}
@@ -436,7 +434,6 @@
         <input type="range" id="speedSlider" min="0.4" max="3" step="0.1" value="1.2">
       </div>
       <button id="playBtn">▶ Play</button>
-      <button id="sessionBtn">Session</button>
       <button id="exportBtn">Export GIF</button>
       <button id="libraryBtn">Library</button>
     </div>
@@ -452,6 +449,49 @@
       <div class="divider"></div>
       <button id="resetDrillBtn">Reset ball</button>
       <div class="divider"></div>
+
+      <div class="side-title">Session</div>
+      <div id="sessionFieldsWrap">
+        <div class="field-label">Name</div>
+        <input type="text" id="sessionName" class="text-input" placeholder="e.g. Rondo Under Pressure">
+
+        <div class="field-label">Type</div>
+        <input type="text" id="sessionType" class="text-input" placeholder="e.g. Possession">
+
+        <div class="field-label">Focus</div>
+        <input type="text" id="sessionFocus" class="text-input" placeholder="e.g. First touch under pressure">
+
+        <div class="field-label">Tags</div>
+        <div id="sessionTagsWrap" class="library-item-tags tags-editor-standalone"></div>
+
+        <div class="divider"></div>
+
+        <div class="field-label">Gate Timing</div>
+        <div class="radio-group" id="gateTimingGroup">
+          <label class="radio-option"><input type="radio" name="gateTiming" value="before" checked> Before the ball is played</label>
+          <label class="radio-option"><input type="radio" name="gateTiming" value="received"> As the ball is received</label>
+          <label class="radio-option"><input type="radio" name="gateTiming" value="after"> After the ball is received</label>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="field-label">Gates Selected</div>
+        <div class="checkbox-grid" id="gatesSelectedGrid"></div>
+
+        <div class="field-label">Number of Gates</div>
+        <div class="checkbox-row" id="numberOfGatesGroup">
+          <label class="checkbox-option"><input type="checkbox" value="1"> 1</label>
+          <label class="checkbox-option"><input type="checkbox" value="2"> 2</label>
+          <label class="checkbox-option"><input type="checkbox" value="3"> 3</label>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="field-label">Notes</div>
+        <textarea id="sessionNotes" class="text-input" rows="4" placeholder="Coaching points, constraints, progressions…"></textarea>
+      </div>
+      <div class="divider"></div>
+
       <div class="hint">
         Pick a tool, then click the pitch to place tokens — new attackers and defenders face the
         ball's starting spot by default. Use <b>Rotate</b> and drag a player to change which way
@@ -459,62 +499,13 @@
         spot, then hit <b>Play</b> to watch the drill run. <b>Reset ball</b> snaps the ball on this
         step back to bottom-center, without touching your other steps. Click a gate on the
         boundary to cycle it through yellow, green, blue, and off — gate colors are saved per
-        step, so they can change as the drill progresses. Use <b>Session</b> to name the drill and
-        record its type, focus, gate timing, gates selected, and notes — this shows in a panel
-        beside the pitch throughout any exported GIF. Every exported GIF is also saved to your
-        <b>Library</b>, where you can tag it and filter by tag — this is stored in this browser only.
+        step, so they can change as the drill progresses. The <b>Session</b> fields above name the
+        drill and record its type, focus, tags, gate timing, gates selected, and notes — this shows
+        in a panel beside the pitch throughout any exported GIF. Every exported GIF is also saved to
+        your <b>Library</b>, where you can tag it and filter by tag.
       </div>
     </aside>
   </main>
-</div>
-<div id="sessionOverlay" class="modal-overlay hidden">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title">Session Settings</div>
-      <button id="sessionCloseBtn" class="modal-close">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="field-label">Name</div>
-      <input type="text" id="sessionName" class="text-input" placeholder="e.g. Rondo Under Pressure">
-
-      <div class="field-row">
-        <div class="field-col">
-          <div class="field-label">Type</div>
-          <input type="text" id="sessionType" class="text-input" placeholder="e.g. Possession">
-        </div>
-        <div class="field-col">
-          <div class="field-label">Focus</div>
-          <input type="text" id="sessionFocus" class="text-input" placeholder="e.g. First touch under pressure">
-        </div>
-      </div>
-
-      <div class="divider"></div>
-
-      <div class="field-label">Gate Timing</div>
-      <div class="radio-group" id="gateTimingGroup">
-        <label class="radio-option"><input type="radio" name="gateTiming" value="before" checked> Before the ball is played</label>
-        <label class="radio-option"><input type="radio" name="gateTiming" value="received"> As the ball is received</label>
-        <label class="radio-option"><input type="radio" name="gateTiming" value="after"> After the ball is received</label>
-      </div>
-
-      <div class="divider"></div>
-
-      <div class="field-label">Gates Selected</div>
-      <div class="checkbox-grid" id="gatesSelectedGrid"></div>
-
-      <div class="field-label">Number of Gates</div>
-      <div class="checkbox-row" id="numberOfGatesGroup">
-        <label class="checkbox-option"><input type="checkbox" value="1"> 1</label>
-        <label class="checkbox-option"><input type="checkbox" value="2"> 2</label>
-        <label class="checkbox-option"><input type="checkbox" value="3"> 3</label>
-      </div>
-
-      <div class="divider"></div>
-
-      <div class="field-label">Notes</div>
-      <textarea id="sessionNotes" class="text-input" rows="4" placeholder="Coaching points, constraints, progressions…"></textarea>
-    </div>
-  </div>
 </div>
 <div id="libraryOverlay" class="modal-overlay hidden">
   <div class="modal modal-wide">
@@ -680,7 +671,7 @@
     loop: false,
     speed: 1.2,
     session: {
-      name:'', type:'', focus:'', gateTiming:'before', notes:'',
+      name:'', type:'', focus:'', gateTiming:'before', notes:'', tags: [],
       gatesSelected: new Array(18).fill(false),
       numberOfGates: new Array(3).fill(false) // index0=1, index1=2, index2=3
     }
@@ -860,7 +851,6 @@
   };
 
   // ---------- session settings ----------
-  const sessionOverlay = document.getElementById('sessionOverlay');
   const brandDrillName = document.getElementById('brandDrillName');
 
   // build the 18 "Gates Selected" checkboxes once
@@ -881,25 +871,40 @@
     });
   });
 
-  function openSessionPanel(){
-    if(playing || exporting) return;
-    document.getElementById('sessionName').value = state.session.name;
-    document.getElementById('sessionType').value = state.session.type;
-    document.getElementById('sessionFocus').value = state.session.focus;
-    document.getElementById('sessionNotes').value = state.session.notes;
-    document.querySelectorAll('input[name="gateTiming"]').forEach(r=>{ r.checked = r.value===state.session.gateTiming; });
-    gatesSelectedGrid.querySelectorAll('input').forEach(cb=>{
-      cb.checked = state.session.gatesSelected[Number(cb.dataset.gateNum)-1];
+  function renderSessionTags(){
+    const wrap = document.getElementById('sessionTagsWrap');
+    wrap.innerHTML = '';
+    state.session.tags.forEach(tag=>{
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.appendChild(document.createTextNode(tag));
+      const rm = document.createElement('button');
+      rm.className = 'tag-remove'; rm.type = 'button'; rm.textContent = '\u00d7';
+      rm.onclick = ()=>{
+        state.session.tags = state.session.tags.filter(t=>t!==tag);
+        renderSessionTags();
+      };
+      chip.appendChild(rm);
+      wrap.appendChild(chip);
     });
-    document.querySelectorAll('#numberOfGatesGroup input').forEach(cb=>{
-      cb.checked = state.session.numberOfGates[Number(cb.value)-1];
+    const input = document.createElement('input');
+    input.type = 'text'; input.className = 'tag-input'; input.placeholder = '+ tag';
+    input.setAttribute('list','libraryTagSuggestions');
+    input.addEventListener('keydown', (e)=>{
+      if(e.key !== 'Enter') return;
+      e.preventDefault();
+      const val = input.value.trim();
+      if(val && !state.session.tags.includes(val)){
+        state.session.tags.push(val);
+        renderSessionTags();
+      } else {
+        input.value = '';
+      }
     });
-    sessionOverlay.classList.remove('hidden');
+    wrap.appendChild(input);
   }
-  function closeSessionPanel(){ sessionOverlay.classList.add('hidden'); }
-  document.getElementById('sessionBtn').onclick = openSessionPanel;
-  document.getElementById('sessionCloseBtn').onclick = closeSessionPanel;
-  sessionOverlay.addEventListener('click', (e)=>{ if(e.target===sessionOverlay) closeSessionPanel(); });
+  renderSessionTags();
+
   document.getElementById('sessionName').addEventListener('input', (e)=>{
     state.session.name = e.target.value;
     brandDrillName.textContent = state.session.name;
@@ -1095,8 +1100,18 @@
       const item = buildLibraryItem(rec, {
         canEdit,
         canDelete: canEdit,
-        downloadLabel: rec.blob ? 'Download' : 'Open',
-        onDownload: ()=> rec.blob ? libDownloadBlob(rec) : window.open(rec.url, '_blank'),
+        downloadLabel: 'Download',
+        onDownload: async ()=>{
+          if(rec.blob){ libDownloadBlob(rec); return; }
+          try{
+            const resp = await fetch(rec.url);
+            const blob = await resp.blob();
+            libDownloadBlob({ name: rec.name, blob });
+          }catch(err){
+            console.error('Direct download failed, opening in a new tab instead:', err);
+            window.open(rec.url, '_blank');
+          }
+        },
         onAddTag: async (val)=>{
           rec.tags = [...(rec.tags||[]), val];
           if(rec.blob) await libSave(rec); else await window.ArcFirebase.updateTags(rec.id, rec.tags);
@@ -1259,12 +1274,11 @@
     render();
   }
   function setControlsEnabled(on){
-    document.querySelectorAll('.tool-btn, .step-btn, .step-del, #addStepBtn, #resetDrillBtn').forEach(el=>{
+    document.querySelectorAll('.tool-btn, .step-btn, .step-del, #addStepBtn, #resetDrillBtn, #sessionFieldsWrap').forEach(el=>{
       el.style.pointerEvents = on ? '' : 'none';
       el.style.opacity = on ? '' : '0.45';
     });
     document.getElementById('exportBtn').disabled = !on;
-    document.getElementById('sessionBtn').disabled = !on;
     document.getElementById('libraryBtn').disabled = !on;
   }
   function easeInOutQuad(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
@@ -1468,14 +1482,15 @@
         let saveMsg = '';
         try{
           const fb = await waitForFirebase();
+          const tagsAtExport = [...state.session.tags];
           if(fb && fb.configured && fb.currentUser){
-            await fb.saveSession({ name: state.session.name, tags: [], blob });
+            await fb.saveSession({ name: state.session.name, tags: tagsAtExport, blob });
             saveMsg = 'GIF downloaded and pushed to the shared Library.';
           } else {
             await libSave({
               id: 'gif_' + Date.now() + '_' + Math.random().toString(36).slice(2,8),
               name: state.session.name || 'Untitled drill',
-              blob: blob, tags: [], createdAt: Date.now()
+              blob: blob, tags: tagsAtExport, createdAt: Date.now()
             });
             saveMsg = (fb && fb.configured)
               ? 'GIF downloaded and saved locally — sign in under Library \u2192 Team sign-in to push it to the shared Library.'
