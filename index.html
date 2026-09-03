@@ -387,6 +387,8 @@
   /* ---------- training plan ---------- */
   #tpSetup{display:flex;flex-direction:column;gap:10px;}
   #tpBuildBtn{align-self:flex-start;}
+  #tpExportRow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+  #tpTagFilterLabel{margin-top:12px;}
   #tpDaysContainer{display:flex;flex-direction:column;gap:16px;margin-top:14px;}
   .tp-day-block{border:1px solid var(--board-line);border-radius:9px;padding:12px;background:rgba(0,0,0,0.14);}
   .tp-day-title{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:16px;letter-spacing:.05em;color:var(--chalk-dim);text-transform:uppercase;margin-bottom:8px;}
@@ -572,8 +574,10 @@
         where you can tag it and filter by tag — each saved session carries its editable data too,
         so hitting <b>Load</b> on one (or <b>Load Drill</b> in the header, for a saved file) brings
         the whole thing back onto the board to branch into a new variation. Use <b>Training
-        Plan</b> to lay out multiple days of sessions pulled from the Library, prescribe sets and
-        balls for each, add notes, and export the whole plan as a printable PDF.
+        Plan</b> to lay out multiple days of sessions pulled from the Library — filter the picker
+        by tag to find them faster — prescribe sets and balls for each, add notes, then export as
+        a printable PDF (with every session's type, focus, tags, gate setup, and notes included)
+        or as a web page with the actual GIFs animating.
       </div>
     </aside>
   </main>
@@ -599,10 +603,13 @@
         <button id="tpBuildBtn" class="lib-action-btn" type="button">Build Plan</button>
       </div>
       <div id="tpLibNotice" class="lib-empty hidden"></div>
+      <div id="tpTagFilterLabel" class="field-label hidden">Filter sessions by tag</div>
+      <div class="tag-filter-row hidden" id="tpTagFilterRow"></div>
       <div id="tpDaysContainer"></div>
       <div id="tpExportRow" class="hidden">
         <div class="divider"></div>
         <button id="tpExportBtn" class="lib-action-btn" type="button">Export Plan (Print / Save as PDF)</button>
+        <button id="tpExportWebBtn" class="lib-action-btn" type="button">Export Plan (Web View, with live GIFs)</button>
       </div>
     </div>
   </div>
@@ -1538,9 +1545,55 @@
   // ---------- training plan ----------
   let trainingPlan = { days: [] };
   let tpLibraryEntries = [];
+  let tpTagFilter = null;
 
   function escapeHtml(str){
     return String(str==null?'':str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // pulls the full Session Settings snapshot (type, focus, gate timing, gates
+  // selected, notes, etc.) that was saved alongside a library entry's drillData
+  function parseDrillSession(entry){
+    if(!entry || !entry.drillData) return null;
+    try{
+      const data = typeof entry.drillData === 'string' ? JSON.parse(entry.drillData) : entry.drillData;
+      return data.session || null;
+    }catch(err){ return null; }
+  }
+  function gateNumberList(arr){
+    return (arr||[]).map((v,i)=> v ? i+1 : null).filter(n=>n!==null);
+  }
+  // shared metadata block used by both the print export and the web-view
+  // export, so a session's full context travels with it either way
+  function buildSessionMetaHtml(slot, sessionMeta){
+    let html = '<h3>' + escapeHtml(slot.name || 'Session') + '</h3>';
+    if(sessionMeta){
+      const sub = [sessionMeta.type, sessionMeta.focus].filter(Boolean).map(escapeHtml).join(' \u00b7 ');
+      if(sub) html += '<p class="wv-sub">' + sub + '</p>';
+      if(sessionMeta.tags && sessionMeta.tags.length){
+        html += '<p><strong>Tags:</strong> ' + sessionMeta.tags.map(escapeHtml).join(', ') + '</p>';
+      }
+    }
+    html += '<p><strong>Sets:</strong> ' + escapeHtml(slot.sets || '\u2014') +
+             ' &nbsp; <strong>Balls:</strong> ' + escapeHtml(slot.balls || '\u2014') + '</p>';
+    if(sessionMeta){
+      html += '<p><strong>Gate timing:</strong> ' + escapeHtml(GATE_TIMING_LABELS[sessionMeta.gateTiming] || GATE_TIMING_LABELS.before) + '</p>';
+      const gs = gateNumberList(sessionMeta.gatesSelected);
+      const nog = gateNumberList(sessionMeta.numberOfGates);
+      html += '<p><strong>Gates selected:</strong> ' + (gs.length ? gs.join(', ') : 'None') + '</p>';
+      html += '<p><strong>Number of gates:</strong> ' + (nog.length ? nog.join(', ') : 'Not set') + '</p>';
+      if(sessionMeta.notes) html += '<p><strong>Session notes:</strong> ' + escapeHtml(sessionMeta.notes) + '</p>';
+    }
+    if(slot.notes) html += '<p><strong>Plan notes:</strong> ' + escapeHtml(slot.notes) + '</p>';
+    return html;
+  }
+  function blobToDataURL(blob){
+    return new Promise((resolve,reject)=>{
+      const reader = new FileReader();
+      reader.onload = ()=>resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
   }
 
   async function getLibraryEntriesForPicker(){
@@ -1622,6 +1675,27 @@
     slotEl.appendChild(details);
   }
 
+  function renderTpTagFilter(){
+    const row = document.getElementById('tpTagFilterRow');
+    const label = document.getElementById('tpTagFilterLabel');
+    const allTags = Array.from(new Set(tpLibraryEntries.flatMap(e=>e.tags||[]))).sort((a,b)=>a.localeCompare(b));
+    row.innerHTML = '';
+    if(allTags.length===0){ row.classList.add('hidden'); label.classList.add('hidden'); return; }
+    row.classList.remove('hidden'); label.classList.remove('hidden');
+    const allChip = document.createElement('button');
+    allChip.type='button'; allChip.className = 'tag-filter-chip' + (tpTagFilter===null ? ' active' : '');
+    allChip.textContent = 'All';
+    allChip.onclick = ()=>{ tpTagFilter = null; renderTrainingPlan(); };
+    row.appendChild(allChip);
+    allTags.forEach(tag=>{
+      const chip = document.createElement('button');
+      chip.type='button'; chip.className = 'tag-filter-chip' + (tpTagFilter===tag ? ' active' : '');
+      chip.textContent = tag;
+      chip.onclick = ()=>{ tpTagFilter = (tpTagFilter===tag ? null : tag); renderTrainingPlan(); };
+      row.appendChild(chip);
+    });
+  }
+
   async function renderTrainingPlan(){
     const container = document.getElementById('tpDaysContainer');
     const noticeEl = document.getElementById('tpLibNotice');
@@ -1630,6 +1704,7 @@
     tpLibraryEntries = entries;
     if(notice){ noticeEl.textContent = notice; noticeEl.classList.remove('hidden'); }
     else noticeEl.classList.add('hidden');
+    renderTpTagFilter();
 
     container.innerHTML = '';
     if(trainingPlan.days.length===0){ exportRow.classList.add('hidden'); return; }
@@ -1651,10 +1726,17 @@
         const emptyOpt = document.createElement('option');
         emptyOpt.value = ''; emptyOpt.textContent = '— choose a session —';
         select.appendChild(emptyOpt);
-        tpLibraryEntries.forEach(entry=>{
+        // tag filter narrows the pool, but never hides whatever is already
+        // picked for this slot, so switching filters can't silently clear it
+        const pool = tpTagFilter
+          ? tpLibraryEntries.filter(e => (e.tags||[]).includes(tpTagFilter) || e.id===slot.libraryId)
+          : tpLibraryEntries.slice();
+        pool.sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+        pool.forEach(entry=>{
           const opt = document.createElement('option');
           opt.value = entry.id;
-          opt.textContent = entry.name || 'Untitled drill';
+          const tagSuffix = (entry.tags && entry.tags.length) ? ' [' + entry.tags.join(', ') + ']' : '';
+          opt.textContent = (entry.name || 'Untitled drill') + tagSuffix;
           if(slot.libraryId === entry.id) opt.selected = true;
           select.appendChild(opt);
         });
@@ -1684,14 +1766,11 @@
       filled.forEach(slot=>{
         const entry = tpLibraryEntries.find(e=>e.id===slot.libraryId);
         const imgSrc = entry ? (entry.blob ? URL.createObjectURL(entry.blob) : entry.url) : '';
+        const sessionMeta = parseDrillSession(entry);
         html += '<div class="tp-print-session">';
         if(imgSrc) html += '<img src="' + imgSrc + '">';
-        html += '<div class="tp-print-session-body">';
-        html += '<h3>' + escapeHtml(slot.name || 'Session') + '</h3>';
-        html += '<p><strong>Sets:</strong> ' + escapeHtml(slot.sets || '\u2014') +
-                 ' &nbsp; <strong>Balls:</strong> ' + escapeHtml(slot.balls || '\u2014') + '</p>';
-        if(slot.notes) html += '<p><strong>Notes:</strong> ' + escapeHtml(slot.notes) + '</p>';
-        html += '</div></div>';
+        html += '<div class="tp-print-session-body">' + buildSessionMetaHtml(slot, sessionMeta) + '</div>';
+        html += '</div>';
       });
       html += '</div>';
     });
@@ -1703,6 +1782,66 @@
     printView.classList.add('printing');
     window.print();
     setTimeout(()=>printView.classList.remove('printing'), 800);
+  }
+
+  function buildWebViewDocument(bodyHtml){
+    return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Training Plan</title>'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1"><style>'
+      + 'body{background:#0F1E17;color:#F4EDE1;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;max-width:900px;margin:0 auto;padding:30px 20px;}'
+      + 'h1{font-size:30px;margin-bottom:24px;}'
+      + '.wv-day{margin-bottom:36px;}'
+      + '.wv-day h2{border-bottom:2px solid #E8B84B;padding-bottom:6px;color:#E8B84B;font-size:20px;}'
+      + '.wv-session{display:flex;gap:18px;background:rgba(255,255,255,0.04);border:1px solid rgba(244,237,225,0.12);border-radius:10px;padding:16px;margin-bottom:16px;}'
+      + '.wv-session img{width:220px;height:auto;border-radius:6px;flex:none;background:#000;}'
+      + '.wv-session-body h3{margin:0 0 6px;font-size:18px;}'
+      + '.wv-session-body p{margin:3px 0;font-size:13.5px;line-height:1.5;color:rgba(244,237,225,0.85);}'
+      + '.wv-sub{color:#E8B84B !important;font-weight:600;}'
+      + '@media (max-width:600px){.wv-session{flex-direction:column;}.wv-session img{width:100%;}}'
+      + '</style></head><body><h1>Training Plan</h1>' + bodyHtml + '</body></html>';
+  }
+
+  async function exportTrainingPlanWeb(){
+    const hasContent = trainingPlan.days.some(day => day.sessions.some(s=>s.libraryId));
+    if(!hasContent){ flash('Add at least one session to a day before exporting.'); return; }
+
+    const exportWebBtn = document.getElementById('tpExportWebBtn');
+    const originalLabel = exportWebBtn.textContent;
+    exportWebBtn.textContent = 'Building…'; exportWebBtn.disabled = true;
+    try{
+      let bodyHtml = '';
+      for(let di=0; di<trainingPlan.days.length; di++){
+        const day = trainingPlan.days[di];
+        const filled = day.sessions.filter(s=>s.libraryId);
+        if(filled.length===0) continue;
+        bodyHtml += '<section class="wv-day"><h2>Day ' + (di+1) + '</h2>';
+        for(const slot of filled){
+          const entry = tpLibraryEntries.find(e=>e.id===slot.libraryId);
+          let imgSrc = '';
+          if(entry){
+            imgSrc = entry.blob ? await blobToDataURL(entry.blob) : entry.url;
+          }
+          const sessionMeta = parseDrillSession(entry);
+          bodyHtml += '<div class="wv-session">';
+          if(imgSrc) bodyHtml += '<img src="' + imgSrc + '" alt="">';
+          bodyHtml += '<div class="wv-session-body">' + buildSessionMetaHtml(slot, sessionMeta) + '</div>';
+          bodyHtml += '</div>';
+        }
+        bodyHtml += '</section>';
+      }
+      const fullHtml = buildWebViewDocument(bodyHtml);
+      const blob = new Blob([fullHtml], {type:'text/html'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'training-plan.html';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(url), 4000);
+      flash('Web view training plan downloaded — GIFs animate when opened in a browser.');
+    } catch(err){
+      console.error(err);
+      flash('Could not build the web view export.');
+    } finally {
+      exportWebBtn.textContent = originalLabel; exportWebBtn.disabled = false;
+    }
   }
 
   const trainingPlanOverlay = document.getElementById('trainingPlanOverlay');
@@ -1724,6 +1863,7 @@
     renderTrainingPlan();
   };
   document.getElementById('tpExportBtn').onclick = exportTrainingPlan;
+  document.getElementById('tpExportWebBtn').onclick = exportTrainingPlanWeb;
 
   // ---------- playback ----------
   let exporting = false;
