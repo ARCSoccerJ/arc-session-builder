@@ -212,6 +212,13 @@
   }
   #loadDrillBtn:hover{border-color:var(--yellow);color:var(--yellow);}
   #loadDrillBtn:disabled{opacity:.5;cursor:not-allowed;}
+  #trainingPlanBtn{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:16px;letter-spacing:0.4px;font-weight:600;
+    background:transparent;color:var(--chalk);border:1px solid var(--board-line);
+    padding:7px 14px;border-radius:8px;cursor:pointer;text-transform:uppercase;
+  }
+  #trainingPlanBtn:hover{border-color:var(--yellow);color:var(--yellow);}
+  #trainingPlanBtn:disabled{opacity:.5;cursor:not-allowed;}
   .speed-wrap{display:flex;flex-direction:column;gap:2px;min-width:110px;}
   .speed-wrap label{font-size:11px;color:var(--chalk-dim);text-transform:uppercase;letter-spacing:.06em;}
   input[type=range]{width:110px;accent-color:var(--yellow);}
@@ -376,6 +383,47 @@
   }
   .lib-action-btn:hover{border-color:var(--yellow);color:var(--chalk);}
   .lib-action-danger:hover{border-color:var(--danger);color:var(--danger);}
+
+  /* ---------- training plan ---------- */
+  #tpSetup{display:flex;flex-direction:column;gap:10px;}
+  #tpBuildBtn{align-self:flex-start;}
+  #tpDaysContainer{display:flex;flex-direction:column;gap:16px;margin-top:14px;}
+  .tp-day-block{border:1px solid var(--board-line);border-radius:9px;padding:12px;background:rgba(0,0,0,0.14);}
+  .tp-day-title{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:16px;letter-spacing:.05em;color:var(--chalk-dim);text-transform:uppercase;margin-bottom:8px;}
+  .tp-session-slot{
+    background:rgba(0,0,0,0.16);border:1px solid var(--board-line);border-radius:8px;
+    padding:10px;margin-bottom:8px;display:flex;flex-direction:column;gap:8px;
+  }
+  .tp-session-slot:last-child{margin-bottom:0;}
+  .tp-session-select{
+    width:100%;background:rgba(0,0,0,0.22);border:1px solid var(--board-line);border-radius:7px;
+    color:var(--chalk);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    font-size:13.5px;padding:8px 10px;
+  }
+  .tp-detail-row{display:flex;gap:10px;}
+  .tp-detail-row .field-col{flex:1;}
+  .tp-detail-row .field-label{margin:2px 0 3px;}
+  .tp-number-input{
+    width:100%;background:rgba(0,0,0,0.22);border:1px solid var(--board-line);border-radius:7px;
+    color:var(--chalk);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    font-size:13.5px;padding:7px 9px;
+  }
+  .tp-notes-input{width:100%;min-height:50px;}
+
+  #tpPrintView{display:none;}
+  @media print{
+    body > *:not(#tpPrintView){display:none !important;}
+    #tpPrintView.printing{
+      display:block !important; position:static; background:#fff; color:#111;
+      font-family:Georgia, 'Times New Roman', serif; padding:0; margin:0;
+    }
+    .tp-print-day{page-break-inside:avoid;margin-bottom:28px;}
+    .tp-print-day h2{font-size:20px;border-bottom:2px solid #111;padding-bottom:4px;margin-bottom:10px;}
+    .tp-print-session{display:flex;gap:14px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #ccc;}
+    .tp-print-session img{width:160px;height:auto;border:1px solid #999;flex:none;}
+    .tp-print-session-body h3{font-size:15px;margin:0 0 4px;}
+    .tp-print-session-body p{font-size:12.5px;margin:2px 0;line-height:1.4;}
+  }
   .lib-team-bar{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
   .lib-auth-status{font-size:12px;color:var(--chalk-dim);flex:1;}
   .lib-link-btn{
@@ -398,7 +446,7 @@
     .tool-btn{font-size:13px;padding:7px 9px;gap:4px;}
     .hotkey{display:none;}
     .play-group{gap:8px;flex-wrap:wrap;}
-    #playBtn,#exportBtn,#libraryBtn,#loadDrillBtn{font-size:13px;padding:7px 11px;}
+    #playBtn,#exportBtn,#libraryBtn,#loadDrillBtn,#trainingPlanBtn{font-size:13px;padding:7px 11px;}
     .speed-wrap{min-width:70px;}
     input[type=range]{width:70px;}
     .toggle{font-size:11px;}
@@ -450,6 +498,7 @@
       <button id="libraryBtn">Library</button>
       <button id="loadDrillBtn">Load Drill</button>
       <input type="file" id="loadDrillFile" accept="application/json" class="hidden">
+      <button id="trainingPlanBtn">Training Plan</button>
     </div>
   </header>
   <main>
@@ -522,11 +571,43 @@
         throughout any exported GIF. Every exported GIF is also saved to your <b>Library</b>,
         where you can tag it and filter by tag — each saved session carries its editable data too,
         so hitting <b>Load</b> on one (or <b>Load Drill</b> in the header, for a saved file) brings
-        the whole thing back onto the board to branch into a new variation.
+        the whole thing back onto the board to branch into a new variation. Use <b>Training
+        Plan</b> to lay out multiple days of sessions pulled from the Library, prescribe sets and
+        balls for each, add notes, and export the whole plan as a printable PDF.
       </div>
     </aside>
   </main>
 </div>
+<div id="trainingPlanOverlay" class="modal-overlay hidden">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <div class="modal-title">Training Plan</div>
+      <button id="tpCloseBtn" class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="tpSetup">
+        <div class="field-row">
+          <div class="field-col">
+            <div class="field-label">Days</div>
+            <input type="number" id="tpDays" class="text-input" min="1" max="30" value="1">
+          </div>
+          <div class="field-col">
+            <div class="field-label">Sessions per day</div>
+            <input type="number" id="tpSessionsPerDay" class="text-input" min="1" max="8" value="1">
+          </div>
+        </div>
+        <button id="tpBuildBtn" class="lib-action-btn" type="button">Build Plan</button>
+      </div>
+      <div id="tpLibNotice" class="lib-empty hidden"></div>
+      <div id="tpDaysContainer"></div>
+      <div id="tpExportRow" class="hidden">
+        <div class="divider"></div>
+        <button id="tpExportBtn" class="lib-action-btn" type="button">Export Plan (Print / Save as PDF)</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="tpPrintView"></div>
 <div id="libraryOverlay" class="modal-overlay hidden">
   <div class="modal modal-wide">
     <div class="modal-header">
@@ -1454,6 +1535,196 @@
   document.getElementById('libraryCloseBtn').onclick = closeLibraryPanel;
   libraryOverlay.addEventListener('click', (e)=>{ if(e.target===libraryOverlay) closeLibraryPanel(); });
 
+  // ---------- training plan ----------
+  let trainingPlan = { days: [] };
+  let tpLibraryEntries = [];
+
+  function escapeHtml(str){
+    return String(str==null?'':str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  async function getLibraryEntriesForPicker(){
+    const fb = await waitForFirebase();
+    if(fb && fb.configured){
+      if(!(libUnlocked || fb.currentUser)){
+        return { entries: [], notice: 'Open the Library and unlock it (passphrase or team sign-in) before building a plan.' };
+      }
+      try{
+        const records = await fb.fetchSessions();
+        records.sort((a,b)=>b.createdAt-a.createdAt);
+        return { entries: records, notice: records.length ? null : 'No saved sessions yet — export a GIF first.' };
+      }catch(err){
+        return { entries: [], notice: 'Could not reach the shared library right now.' };
+      }
+    } else {
+      try{
+        const records = await libGetAll();
+        records.sort((a,b)=>b.createdAt-a.createdAt);
+        return { entries: records, notice: records.length ? null : 'No saved sessions yet — export a GIF first to add one to the Library.' };
+      }catch(err){
+        return { entries: [], notice: 'Saved sessions aren\'t available in this browser/environment.' };
+      }
+    }
+  }
+
+  function rebuildTrainingPlanStructure(){
+    const days = Math.max(1, Math.min(30, Number(document.getElementById('tpDays').value)||1));
+    const perDay = Math.max(1, Math.min(8, Number(document.getElementById('tpSessionsPerDay').value)||1));
+    const newDays = [];
+    for(let d=0; d<days; d++){
+      const oldDay = trainingPlan.days[d];
+      const sessions = [];
+      for(let s=0; s<perDay; s++){
+        sessions.push((oldDay && oldDay.sessions[s]) ? oldDay.sessions[s] : { libraryId:null, name:'', sets:'', balls:'', notes:'' });
+      }
+      newDays.push({ sessions });
+    }
+    trainingPlan.days = newDays;
+  }
+
+  function renderTrainingPlanSlotDetails(slotEl, slot){
+    const old = slotEl.querySelector('.tp-slot-details');
+    if(old) old.remove();
+    if(!slot.libraryId) return;
+
+    const details = document.createElement('div');
+    details.className = 'tp-slot-details';
+
+    const row = document.createElement('div');
+    row.className = 'tp-detail-row';
+    const setsCol = document.createElement('div'); setsCol.className = 'field-col';
+    setsCol.innerHTML = '<div class="field-label">Sets</div>';
+    const setsInput = document.createElement('input');
+    setsInput.type = 'number'; setsInput.min = '0'; setsInput.className = 'tp-number-input'; setsInput.value = slot.sets || '';
+    setsInput.addEventListener('input', ()=>{ slot.sets = setsInput.value; });
+    setsCol.appendChild(setsInput);
+
+    const ballsCol = document.createElement('div'); ballsCol.className = 'field-col';
+    ballsCol.innerHTML = '<div class="field-label">Balls</div>';
+    const ballsInput = document.createElement('input');
+    ballsInput.type = 'number'; ballsInput.min = '0'; ballsInput.className = 'tp-number-input'; ballsInput.value = slot.balls || '';
+    ballsInput.addEventListener('input', ()=>{ slot.balls = ballsInput.value; });
+    ballsCol.appendChild(ballsInput);
+
+    row.appendChild(setsCol); row.appendChild(ballsCol);
+    details.appendChild(row);
+
+    const notesLabel = document.createElement('div');
+    notesLabel.className = 'field-label'; notesLabel.textContent = 'Notes';
+    details.appendChild(notesLabel);
+    const notesInput = document.createElement('textarea');
+    notesInput.className = 'text-input tp-notes-input';
+    notesInput.placeholder = 'Notes for this session…';
+    notesInput.value = slot.notes || '';
+    notesInput.addEventListener('input', ()=>{ slot.notes = notesInput.value; });
+    details.appendChild(notesInput);
+
+    slotEl.appendChild(details);
+  }
+
+  async function renderTrainingPlan(){
+    const container = document.getElementById('tpDaysContainer');
+    const noticeEl = document.getElementById('tpLibNotice');
+    const exportRow = document.getElementById('tpExportRow');
+    const { entries, notice } = await getLibraryEntriesForPicker();
+    tpLibraryEntries = entries;
+    if(notice){ noticeEl.textContent = notice; noticeEl.classList.remove('hidden'); }
+    else noticeEl.classList.add('hidden');
+
+    container.innerHTML = '';
+    if(trainingPlan.days.length===0){ exportRow.classList.add('hidden'); return; }
+
+    trainingPlan.days.forEach((day, di)=>{
+      const dayBlock = document.createElement('div');
+      dayBlock.className = 'tp-day-block';
+      const title = document.createElement('div');
+      title.className = 'tp-day-title';
+      title.textContent = 'Day ' + (di+1);
+      dayBlock.appendChild(title);
+
+      day.sessions.forEach(slot=>{
+        const slotEl = document.createElement('div');
+        slotEl.className = 'tp-session-slot';
+
+        const select = document.createElement('select');
+        select.className = 'tp-session-select';
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = ''; emptyOpt.textContent = '— choose a session —';
+        select.appendChild(emptyOpt);
+        tpLibraryEntries.forEach(entry=>{
+          const opt = document.createElement('option');
+          opt.value = entry.id;
+          opt.textContent = entry.name || 'Untitled drill';
+          if(slot.libraryId === entry.id) opt.selected = true;
+          select.appendChild(opt);
+        });
+        select.addEventListener('change', ()=>{
+          const entry = tpLibraryEntries.find(e=>e.id===select.value);
+          slot.libraryId = select.value || null;
+          slot.name = entry ? (entry.name || 'Untitled drill') : '';
+          renderTrainingPlanSlotDetails(slotEl, slot);
+        });
+        slotEl.appendChild(select);
+        renderTrainingPlanSlotDetails(slotEl, slot);
+        dayBlock.appendChild(slotEl);
+      });
+
+      container.appendChild(dayBlock);
+    });
+    exportRow.classList.remove('hidden');
+  }
+
+  function exportTrainingPlan(){
+    const printView = document.getElementById('tpPrintView');
+    let html = '<h1 style="font-size:26px;margin-bottom:10px;">Training Plan</h1>';
+    trainingPlan.days.forEach((day, di)=>{
+      const filled = day.sessions.filter(s=>s.libraryId);
+      if(filled.length===0) return;
+      html += '<div class="tp-print-day"><h2>Day ' + (di+1) + '</h2>';
+      filled.forEach(slot=>{
+        const entry = tpLibraryEntries.find(e=>e.id===slot.libraryId);
+        const imgSrc = entry ? (entry.blob ? URL.createObjectURL(entry.blob) : entry.url) : '';
+        html += '<div class="tp-print-session">';
+        if(imgSrc) html += '<img src="' + imgSrc + '">';
+        html += '<div class="tp-print-session-body">';
+        html += '<h3>' + escapeHtml(slot.name || 'Session') + '</h3>';
+        html += '<p><strong>Sets:</strong> ' + escapeHtml(slot.sets || '\u2014') +
+                 ' &nbsp; <strong>Balls:</strong> ' + escapeHtml(slot.balls || '\u2014') + '</p>';
+        if(slot.notes) html += '<p><strong>Notes:</strong> ' + escapeHtml(slot.notes) + '</p>';
+        html += '</div></div>';
+      });
+      html += '</div>';
+    });
+    if(!html.includes('tp-print-day')){
+      flash('Add at least one session to a day before exporting.');
+      return;
+    }
+    printView.innerHTML = html;
+    printView.classList.add('printing');
+    window.print();
+    setTimeout(()=>printView.classList.remove('printing'), 800);
+  }
+
+  const trainingPlanOverlay = document.getElementById('trainingPlanOverlay');
+  function openTrainingPlanPanel(){
+    if(playing || exporting) return;
+    trainingPlanOverlay.classList.remove('hidden');
+    if(trainingPlan.days.length){
+      document.getElementById('tpDays').value = trainingPlan.days.length;
+      document.getElementById('tpSessionsPerDay').value = trainingPlan.days[0].sessions.length;
+      renderTrainingPlan();
+    }
+  }
+  function closeTrainingPlanPanel(){ trainingPlanOverlay.classList.add('hidden'); }
+  document.getElementById('trainingPlanBtn').onclick = openTrainingPlanPanel;
+  document.getElementById('tpCloseBtn').onclick = closeTrainingPlanPanel;
+  trainingPlanOverlay.addEventListener('click', (e)=>{ if(e.target===trainingPlanOverlay) closeTrainingPlanPanel(); });
+  document.getElementById('tpBuildBtn').onclick = ()=>{
+    rebuildTrainingPlanStructure();
+    renderTrainingPlan();
+  };
+  document.getElementById('tpExportBtn').onclick = exportTrainingPlan;
+
   // ---------- playback ----------
   let exporting = false;
   const playBtn = document.getElementById('playBtn');
@@ -1480,6 +1751,7 @@
     document.getElementById('exportBtn').disabled = !on;
     document.getElementById('libraryBtn').disabled = !on;
     document.getElementById('loadDrillBtn').disabled = !on;
+    document.getElementById('trainingPlanBtn').disabled = !on;
   }
   function easeInOutQuad(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
 
