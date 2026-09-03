@@ -71,7 +71,7 @@
     api.signIn = (email, password)=> signInWithEmailAndPassword(auth, email, password);
     api.signOut = ()=> fbSignOut(auth);
 
-    api.saveSession = async ({name, tags, blob})=>{
+    api.saveSession = async ({name, tags, blob, drillData})=>{
       if(!auth.currentUser) throw new Error('Not signed in');
       const path = 'gifs/' + Date.now() + '_' + Math.random().toString(36).slice(2,8) + '.gif';
       const fileRef = ref(storage, path);
@@ -81,6 +81,7 @@
         name: name || 'Untitled drill',
         tags: tags || [],
         url, storagePath: path,
+        drillData: drillData ? JSON.stringify(drillData) : null,
         createdAt: Date.now(),
         createdBy: auth.currentUser.email
       });
@@ -204,6 +205,13 @@
   }
   #libraryBtn:hover{border-color:var(--yellow);color:var(--yellow);}
   #libraryBtn:disabled{opacity:.5;cursor:not-allowed;}
+  #loadDrillBtn{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:16px;letter-spacing:0.4px;font-weight:600;
+    background:transparent;color:var(--chalk);border:1px solid var(--board-line);
+    padding:7px 14px;border-radius:8px;cursor:pointer;text-transform:uppercase;
+  }
+  #loadDrillBtn:hover{border-color:var(--yellow);color:var(--yellow);}
+  #loadDrillBtn:disabled{opacity:.5;cursor:not-allowed;}
   .speed-wrap{display:flex;flex-direction:column;gap:2px;min-width:110px;}
   .speed-wrap label{font-size:11px;color:var(--chalk-dim);text-transform:uppercase;letter-spacing:.06em;}
   input[type=range]{width:110px;accent-color:var(--yellow);}
@@ -264,6 +272,7 @@
     display:flex;align-items:center;justify-content:center;z-index:50;
   }
   .modal-overlay.hidden{display:none;}
+  .hidden{display:none;}
   .modal{
     width:420px;max-width:calc(100vw - 32px);max-height:calc(100vh - 48px);overflow-y:auto;
     background:var(--board-raised);border:1px solid var(--board-line);border-radius:12px;
@@ -389,7 +398,7 @@
     .tool-btn{font-size:13px;padding:7px 9px;gap:4px;}
     .hotkey{display:none;}
     .play-group{gap:8px;flex-wrap:wrap;}
-    #playBtn,#exportBtn,#libraryBtn{font-size:13px;padding:7px 11px;}
+    #playBtn,#exportBtn,#libraryBtn,#loadDrillBtn{font-size:13px;padding:7px 11px;}
     .speed-wrap{min-width:70px;}
     input[type=range]{width:70px;}
     .toggle{font-size:11px;}
@@ -439,6 +448,8 @@
       <button id="playBtn">▶ Play</button>
       <button id="exportBtn">Export GIF</button>
       <button id="libraryBtn">Library</button>
+      <button id="loadDrillBtn">Load Drill</button>
+      <input type="file" id="loadDrillFile" accept="application/json" class="hidden">
     </div>
   </header>
   <main>
@@ -509,7 +520,9 @@
         step, so they can change as the drill progresses. The <b>Session</b> fields above name the drill and record its type, focus,
         tags, gate timing, gates selected, and notes — this shows in a panel beside the pitch
         throughout any exported GIF. Every exported GIF is also saved to your <b>Library</b>,
-        where you can tag it and filter by tag.
+        where you can tag it and filter by tag — each saved session carries its editable data too,
+        so hitting <b>Load</b> on one (or <b>Load Drill</b> in the header, for a saved file) brings
+        the whole thing back onto the board to branch into a new variation.
       </div>
     </aside>
   </main>
@@ -996,6 +1009,73 @@
   }
   renderSessionTags();
 
+  // ---------- drill data (editable snapshot, separate from the rendered GIF) ----------
+  function captureDrillData(){
+    return {
+      version: 1,
+      session: JSON.parse(JSON.stringify(state.session)),
+      steps: JSON.parse(JSON.stringify(state.steps)),
+      nextPlayer: state.nextPlayer, nextCone: state.nextCone, nextBall: state.nextBall
+    };
+  }
+  function applyDrillData(data){
+    if(!data || !Array.isArray(data.steps) || data.steps.length===0){
+      throw new Error('That file doesn\'t look like a drill export.');
+    }
+    state.steps = data.steps;
+    state.currentStep = 0;
+    state.session = Object.assign(
+      { name:'', type:'', focus:'', gateTiming:'before', notes:'', tags:[],
+        gatesSelected:new Array(18).fill(false), numberOfGates:new Array(3).fill(false) },
+      data.session || {}
+    );
+    state.nextPlayer = data.nextPlayer || 1;
+    state.nextCone = data.nextCone || 1;
+    state.nextBall = data.nextBall || 1;
+
+    document.getElementById('sessionName').value = state.session.name;
+    document.getElementById('sessionType').value = state.session.type;
+    document.getElementById('sessionFocus').value = state.session.focus;
+    document.getElementById('sessionNotes').value = state.session.notes;
+    document.querySelectorAll('input[name="gateTiming"]').forEach(r=>{ r.checked = r.value===state.session.gateTiming; });
+    gatesSelectedGrid.querySelectorAll('input').forEach(cb=>{
+      cb.checked = state.session.gatesSelected[Number(cb.dataset.gateNum)-1];
+    });
+    document.querySelectorAll('#numberOfGatesGroup input').forEach(cb=>{
+      cb.checked = state.session.numberOfGates[Number(cb.value)-1];
+    });
+    renderSessionTags();
+    brandDrillName.textContent = state.session.name;
+    render();
+  }
+  function loadDrillFromFile(file){
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      try{
+        const data = JSON.parse(reader.result);
+        applyDrillData(data);
+        flash('Drill loaded — make your changes and export a new variation.');
+      }catch(err){
+        console.error(err);
+        flash('Could not load that file: ' + err.message);
+      }
+    };
+    reader.onerror = ()=> flash('Could not read that file.');
+    reader.readAsText(file);
+  }
+  const loadDrillFile = document.getElementById('loadDrillFile');
+  document.getElementById('loadDrillBtn').onclick = ()=>{
+    if(playing || exporting) return;
+    if(state.steps.length>1 || currentObjects().length>1){
+      if(!confirm('Loading a drill replaces everything currently on the board. Continue?')) return;
+    }
+    loadDrillFile.click();
+  };
+  loadDrillFile.addEventListener('change', ()=>{
+    if(loadDrillFile.files[0]) loadDrillFromFile(loadDrillFile.files[0]);
+    loadDrillFile.value = '';
+  });
+
   document.getElementById('sessionName').addEventListener('input', (e)=>{
     state.session.name = e.target.value;
     brandDrillName.textContent = state.session.name;
@@ -1139,6 +1219,12 @@
     dlBtn.className = 'lib-action-btn'; dlBtn.type = 'button'; dlBtn.textContent = opts.downloadLabel || 'Download';
     dlBtn.onclick = opts.onDownload;
     actions.appendChild(dlBtn);
+    if(rec.drillData){
+      const loadBtn = document.createElement('button');
+      loadBtn.className = 'lib-action-btn'; loadBtn.type = 'button'; loadBtn.textContent = 'Load';
+      loadBtn.onclick = opts.onLoad;
+      actions.appendChild(loadBtn);
+    }
     if(opts.canDelete){
       const delBtn = document.createElement('button');
       delBtn.className = 'lib-action-btn lib-action-danger'; delBtn.type = 'button'; delBtn.textContent = 'Delete';
@@ -1199,6 +1285,20 @@
         onView: ()=>{
           const url = rec.blob ? URL.createObjectURL(rec.blob) : rec.url;
           window.open(url, '_blank');
+        },
+        onLoad: ()=>{
+          if(state.steps.length>1 || currentObjects().length>1){
+            if(!confirm('Loading this drill replaces everything currently on the board. Continue?')) return;
+          }
+          try{
+            const data = typeof rec.drillData === 'string' ? JSON.parse(rec.drillData) : rec.drillData;
+            applyDrillData(data);
+            closeLibraryPanel();
+            flash('Drill loaded — make your changes and export a new variation.');
+          }catch(err){
+            console.error(err);
+            flash('Could not load this drill: ' + err.message);
+          }
         },
         onDownload: async ()=>{
           if(rec.blob){ libDownloadBlob(rec); return; }
@@ -1379,6 +1479,7 @@
     });
     document.getElementById('exportBtn').disabled = !on;
     document.getElementById('libraryBtn').disabled = !on;
+    document.getElementById('loadDrillBtn').disabled = !on;
   }
   function easeInOutQuad(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
 
@@ -1582,14 +1683,15 @@
         try{
           const fb = await waitForFirebase();
           const tagsAtExport = [...state.session.tags];
+          const drillData = captureDrillData();
           if(fb && fb.configured && fb.currentUser){
-            await fb.saveSession({ name: state.session.name, tags: tagsAtExport, blob });
+            await fb.saveSession({ name: state.session.name, tags: tagsAtExport, blob, drillData });
             saveMsg = 'GIF downloaded and pushed to the shared Library.';
           } else {
             await libSave({
               id: 'gif_' + Date.now() + '_' + Math.random().toString(36).slice(2,8),
               name: state.session.name || 'Untitled drill',
-              blob: blob, tags: tagsAtExport, createdAt: Date.now()
+              blob: blob, tags: tagsAtExport, createdAt: Date.now(), drillData
             });
             saveMsg = (fb && fb.configured)
               ? 'GIF downloaded and saved locally — sign in under Library \u2192 Team sign-in to push it to the shared Library.'
