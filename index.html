@@ -471,6 +471,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     .tp-print-qr-small{text-align:center;font-size:9px;color:#333;flex:none;}
     .tp-print-qr-small img{width:120px;height:120px;}
     .tp-print-qr-small p{margin:4px 0 0;line-height:1.25;}
+    .tp-print-scores{margin-top:10px;font-size:11.5px;}
+    .tp-print-scores strong{margin-right:10px;text-transform:uppercase;letter-spacing:.04em;font-size:10.5px;color:#555;}
+    .tp-score-cell{display:inline-flex;align-items:center;margin-right:16px;white-space:nowrap;}
+    .tp-score-blank{display:inline-block;width:34px;border-bottom:1px solid #333;margin-left:5px;height:11px;}
   }
   .lib-team-bar{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
   .lib-auth-status{font-size:12px;color:var(--chalk-dim);flex:1;}
@@ -1613,6 +1617,29 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   function gateNumberList(arr){
     return (arr||[]).map((v,i)=> v ? i+1 : null).filter(n=>n!==null);
   }
+  // how many score slots to offer for a session — one per prescribed set,
+  // falling back to a reasonable default when Sets wasn't filled in
+  function getSetCount(slot){
+    const n = parseInt(slot.sets, 10);
+    return (n && n > 0 && n <= 20) ? n : 3;
+  }
+  function buildPrintScoresHtml(slot){
+    const n = getSetCount(slot);
+    let html = '<div class="tp-print-scores"><strong>Scores</strong>';
+    for(let i=1;i<=n;i++){
+      html += '<span class="tp-score-cell">Set ' + i + '<span class="tp-score-blank"></span></span>';
+    }
+    return html + '</div>';
+  }
+  function buildWebScoresHtml(slot, keyPrefix){
+    const n = getSetCount(slot);
+    let html = '<div class="wv-scores"><div class="wv-scores-label">Scores</div><div class="wv-scores-row">';
+    for(let i=1;i<=n;i++){
+      html += '<label class="wv-score-field">Set ' + i
+        + '<input type="text" class="wv-score-input" data-key="' + keyPrefix + '-set' + i + '" placeholder="\u2014"></label>';
+    }
+    return html + '</div></div>';
+  }
   // shared metadata block used by both the print export and the web-view
   // export, so a session's full context travels with it either way
   function buildSessionMetaHtml(slot, sessionMeta){
@@ -1915,7 +1942,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
           html += '<div class="tp-print-session">';
           if(imgSrc) html += '<img class="tp-print-thumb" src="' + imgSrc + '">';
-          html += '<div class="tp-print-session-body">' + buildSessionMetaHtml(slot, sessionMeta) + '</div>';
+          html += '<div class="tp-print-session-body">' + buildSessionMetaHtml(slot, sessionMeta) + buildPrintScoresHtml(slot) + '</div>';
           html += qrBlock;
           html += '</div>';
         }
@@ -1950,13 +1977,19 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       + '.wv-session-body p{margin:3px 0;font-size:13.5px;line-height:1.5;color:rgba(244,237,225,0.85);}'
       + '.wv-sub{color:#E8B84B !important;font-weight:600;}'
       + '.wv-hint{font-size:11.5px;color:rgba(244,237,225,0.45);margin:-14px 0 24px;}'
+      + '.wv-scores{margin-top:10px;padding-top:10px;border-top:1px solid rgba(244,237,225,0.15);}'
+      + '.wv-scores-label{font-size:11px;font-weight:600;color:rgba(244,237,225,0.55);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;}'
+      + '.wv-scores-row{display:flex;flex-wrap:wrap;gap:8px;}'
+      + '.wv-score-field{display:flex;flex-direction:column;font-size:10.5px;color:rgba(244,237,225,0.7);gap:3px;}'
+      + '.wv-score-input{width:56px;background:rgba(0,0,0,0.3);border:1px solid rgba(244,237,225,0.22);border-radius:5px;color:#F4EDE1;font-family:inherit;font-size:13px;padding:5px 6px;}'
+      + '.wv-score-input:focus{outline:none;border-color:#E8B84B;}'
       + '.wv-lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:999;align-items:center;justify-content:center;padding:24px;cursor:zoom-out;}'
       + '.wv-lightbox.open{display:flex;}'
       + '.wv-lightbox img{max-width:95vw;max-height:95vh;border-radius:8px;box-shadow:0 24px 60px rgba(0,0,0,0.6);}'
       + '@media (max-width:600px){.wv-session{flex-direction:column;}.wv-gif{width:100%;}}'
       + '</style></head><body>'
       + '<h1>' + planTitle + '</h1>'
-      + '<p class="wv-hint">Click any GIF to view it larger.</p>'
+      + '<p class="wv-hint">Click any GIF to view it larger. Scores you enter below are saved in this browser automatically.</p>'
       + bodyHtml
       + '<div class="wv-lightbox" id="wvLightbox"><img id="wvLightboxImg" src="" alt=""></div>'
       + '<script>'
@@ -1967,6 +2000,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       + '});});'
       + 'document.getElementById("wvLightbox").addEventListener("click", function(){'
       + 'this.classList.remove("open");'
+      + '});'
+      + 'document.querySelectorAll(".wv-score-input").forEach(function(inp){'
+      + 'var key = "arcScore_" + inp.dataset.key;'
+      + 'try{ var saved = localStorage.getItem(key); if(saved !== null) inp.value = saved; }catch(e){}'
+      + 'inp.addEventListener("input", function(){ try{ localStorage.setItem(key, inp.value); }catch(e){} });'
       + '});'
       + '<\/script>'
       + '</body></html>';
@@ -1979,16 +2017,18 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const filled = day.sessions.filter(s=>s.libraryId);
       if(filled.length===0) continue;
       bodyHtml += '<section class="wv-day"><h2>Day ' + (di+1) + '</h2>';
-      for(const slot of filled){
+      for(let si=0; si<filled.length; si++){
+        const slot = filled[si];
         const entry = tpLibraryEntries.find(e=>e.id===slot.libraryId);
         let imgSrc = '';
         if(entry){
           imgSrc = entry.blob ? await blobToDataURL(entry.blob) : entry.url;
         }
         const sessionMeta = parseDrillSession(entry);
+        const keyPrefix = 'd' + di + '-s' + si + '-' + (slot.libraryId || 'x');
         bodyHtml += '<div class="wv-session">';
         if(imgSrc) bodyHtml += '<img class="wv-gif" src="' + imgSrc + '" alt="">';
-        bodyHtml += '<div class="wv-session-body">' + buildSessionMetaHtml(slot, sessionMeta) + '</div>';
+        bodyHtml += '<div class="wv-session-body">' + buildSessionMetaHtml(slot, sessionMeta) + buildWebScoresHtml(slot, keyPrefix) + '</div>';
         bodyHtml += '</div>';
       }
       bodyHtml += '</section>';
