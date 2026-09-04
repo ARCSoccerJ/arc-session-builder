@@ -503,23 +503,23 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       display:block !important; position:static; background:#fff; color:#111;
       font-family:Georgia, 'Times New Roman', serif; padding:0; margin:0;
     }
-    .tp-print-focuses{font-size:12.5px;margin:0 0 4px;color:#333;}
-    .tp-print-description{font-size:12.5px;margin:0 0 20px;line-height:1.5;color:#333;max-width:640px;}
+    .tp-print-focuses{font-size:14px;margin:0 0 5px;color:#333;}
+    .tp-print-description{font-size:14px;margin:0 0 20px;line-height:1.5;color:#333;max-width:640px;}
     .tp-print-day{page-break-inside:avoid;margin-bottom:28px;}
-    .tp-print-day h2{font-size:20px;border-bottom:2px solid #111;padding-bottom:4px;margin-bottom:10px;}
+    .tp-print-day h2{font-size:23px;border-bottom:2px solid #111;padding-bottom:4px;margin-bottom:10px;}
     .tp-print-session{
       display:flex;align-items:center;gap:16px;margin-bottom:14px;padding:12px;
       border:1px solid #ccc;border-radius:6px;page-break-inside:avoid;
     }
     .tp-print-thumb{width:240px;height:auto;border:1px solid #999;flex:none;}
     .tp-print-session-body{flex:1;min-width:0;}
-    .tp-print-session-body h3{font-size:15px;margin:0 0 4px;}
-    .tp-print-session-body p{font-size:12.5px;margin:2px 0;line-height:1.4;}
-    .tp-print-qr-small{text-align:center;font-size:9px;color:#333;flex:none;}
+    .tp-print-session-body h3{font-size:18px;margin:0 0 5px;}
+    .tp-print-session-body p{font-size:14px;margin:3px 0;line-height:1.5;}
+    .tp-print-qr-small{text-align:center;font-size:10.5px;color:#333;flex:none;}
     .tp-print-qr-small img{width:120px;height:120px;}
-    .tp-print-qr-small p{margin:4px 0 0;line-height:1.25;}
-    .tp-print-scores{margin-top:10px;font-size:11.5px;}
-    .tp-print-scores strong{margin-right:10px;text-transform:uppercase;letter-spacing:.04em;font-size:10.5px;color:#555;}
+    .tp-print-qr-small p{margin:4px 0 0;line-height:1.3;}
+    .tp-print-scores{margin-top:10px;font-size:13px;}
+    .tp-print-scores strong{margin-right:10px;text-transform:uppercase;letter-spacing:.04em;font-size:11.5px;color:#555;}
     .tp-score-cell{display:inline-flex;align-items:center;margin-right:16px;white-space:nowrap;}
     .tp-score-blank{display:inline-block;width:34px;border-bottom:1px solid #333;margin-left:5px;height:11px;}
   }
@@ -2143,8 +2143,22 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     printView.innerHTML = html;
     printView.classList.add('printing');
+    // window.print() doesn't wait for images itself — without this, any
+    // image still loading (remote fallback thumbnails, in particular) can
+    // print blank or as a thin line if the dialog opens before it's ready
+    await waitForImagesToLoad(printView);
     window.print();
     setTimeout(()=>printView.classList.remove('printing'), 800);
+  }
+  function waitForImagesToLoad(container){
+    const imgs = Array.from(container.querySelectorAll('img'));
+    return Promise.all(imgs.map(img=>{
+      if(img.complete) return Promise.resolve();
+      return new Promise(resolve=>{
+        img.addEventListener('load', resolve, {once:true});
+        img.addEventListener('error', resolve, {once:true}); // don't hang forever on a broken one
+      });
+    }));
   }
 
   function buildWebViewDocument(bodyHtml, fbConfig, scoreMeta, planId){
