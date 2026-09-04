@@ -511,7 +511,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       display:flex;align-items:center;gap:16px;margin-bottom:14px;padding:12px;
       border:1px solid #ccc;border-radius:6px;page-break-inside:avoid;
     }
-    .tp-print-thumb{width:150px;height:auto;border:1px solid #999;flex:none;}
+    .tp-print-thumb{width:240px;height:auto;border:1px solid #999;flex:none;}
     .tp-print-session-body{flex:1;min-width:0;}
     .tp-print-session-body h3{font-size:15px;margin:0 0 4px;}
     .tp-print-session-body p{font-size:12.5px;margin:2px 0;line-height:1.4;}
@@ -1698,6 +1698,25 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       return data.session || null;
     }catch(err){ return null; }
   }
+  function parseDrillSteps(entry){
+    if(!entry || !entry.drillData) return null;
+    try{
+      const data = typeof entry.drillData === 'string' ? JSON.parse(entry.drillData) : entry.drillData;
+      return Array.isArray(data.steps) ? data.steps : null;
+    }catch(err){ return null; }
+  }
+  // renders a specific step onto the main pitch canvas and grabs a still —
+  // no session-info sidebar (that's not part of this canvas at all), and it
+  // shows an actual chosen step rather than whatever frame a GIF happens to
+  // rasterize to on paper. Leaves the board showing this step afterward;
+  // callers should call render() once done to restore the normal view.
+  function renderStepThumbnailDataUrl(step){
+    if(!step) return null;
+    try{
+      drawFrame(step.objects || [], step.gates || new Array(gatePositions.length).fill('off'));
+      return canvas.toDataURL('image/png');
+    }catch(err){ console.error('Could not render step thumbnail:', err); return null; }
+  }
   function gateNumberList(arr){
     return (arr||[]).map((v,i)=> v ? i+1 : null).filter(n=>n!==null);
   }
@@ -2081,7 +2100,18 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         html += '<div class="tp-print-day"><h2>Day ' + (di+1) + '</h2>';
         for(const slot of filled){
           const entry = tpLibraryEntries.find(e=>e.id===slot.libraryId);
-          const imgSrc = entry ? (entry.blob ? URL.createObjectURL(entry.blob) : entry.url) : '';
+          let imgSrc = '';
+          const steps = entry ? parseDrillSteps(entry) : null;
+          if(steps && steps.length){
+            // Step 2 gives a better look at the actual set-up than Step 1
+            // (often just a starting/blank position); fall back to Step 1
+            // if that's all there is
+            const stepIdx = steps.length >= 2 ? 1 : 0;
+            imgSrc = renderStepThumbnailDataUrl(steps[stepIdx]);
+          }
+          if(!imgSrc && entry){
+            imgSrc = entry.blob ? URL.createObjectURL(entry.blob) : entry.url;
+          }
           const sessionMeta = parseDrillSession(entry);
 
           let qrBlock = '';
@@ -2104,6 +2134,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
     } finally {
       exportBtn.textContent = originalLabel; exportBtn.disabled = false;
+      render(); // step thumbnails were drawn using the live pitch canvas
     }
 
     if(anyMissingLink){
