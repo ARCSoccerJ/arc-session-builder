@@ -35,7 +35,7 @@
     getAuth, signInWithEmailAndPassword, signOut as fbSignOut, onAuthStateChanged
   } from 'https://www.gstatic.com/firebasejs/12.9.0/firebase-auth.js';
   import {
-    getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc
+    getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, setDoc
   } from 'https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js';
   import {
     getStorage, ref, uploadBytes, getDownloadURL, deleteObject
@@ -53,7 +53,7 @@
   };
   const isConfigured = !Object.values(firebaseConfig).some(v => String(v).indexOf('YOUR_') === 0);
 
-  const api = { configured: isConfigured, currentUser: null, _authListeners: [] };
+  const api = { configured: isConfigured, currentUser: null, _authListeners: [], config: isConfigured ? firebaseConfig : null };
 
   if(isConfigured){
     const app = initializeApp(firebaseConfig);
@@ -61,6 +61,7 @@
     const db = getFirestore(app);
     const storage = getStorage(app);
     const SESSIONS = collection(db, 'sessions');
+    const PLANS = collection(db, 'trainingPlans');
 
     onAuthStateChanged(auth, user=>{
       api.currentUser = user;
@@ -99,6 +100,34 @@
       await deleteDoc(doc(db,'sessions',id));
       if(storagePath){ try{ await deleteObject(ref(storage, storagePath)); }catch(e){} }
     };
+    // Training plans: save/fetch are intentionally open (no auth check) so
+    // anyone holding the Library passphrase can record scores without an
+    // account — the passphrase gate in the app UI is the only protection
+    // here, same trade-off already accepted for the GIF library's read
+    // access. Deleting a whole plan stays restricted to signed-in team.
+    api.savePlan = async (planData)=>{
+      const payload = {
+        name: planData.name || 'Untitled plan',
+        days: planData.days || [],
+        updatedAt: Date.now()
+      };
+      if(planData.id){
+        await setDoc(doc(db,'trainingPlans',planData.id), payload, { merge: true });
+        return planData.id;
+      } else {
+        payload.createdAt = Date.now();
+        const ref2 = await addDoc(PLANS, payload);
+        return ref2.id;
+      }
+    };
+    api.fetchPlans = async ()=>{
+      const snap = await getDocs(PLANS);
+      return snap.docs.map(d=>({ id:d.id, ...d.data() }));
+    };
+    api.deletePlan = async (id)=>{
+      if(!auth.currentUser) throw new Error('Not signed in');
+      await deleteDoc(doc(db,'trainingPlans',id));
+    };
     // hosts a standalone HTML page (e.g. a training plan's web view) so a
     // QR code on the printed version can link to a live, working page
     api.uploadHtml = async (htmlString, filenameHint)=>{
@@ -117,6 +146,9 @@
     api.updateTags = ()=> Promise.reject(new Error('Shared library is not configured yet.'));
     api.deleteSession = ()=> Promise.reject(new Error('Shared library is not configured yet.'));
     api.uploadHtml = ()=> Promise.reject(new Error('Shared library is not configured yet.'));
+    api.savePlan = ()=> Promise.reject(new Error('Shared library is not configured yet.'));
+    api.fetchPlans = ()=> Promise.resolve([]);
+    api.deletePlan = ()=> Promise.reject(new Error('Shared library is not configured yet.'));
   }
 
   window.ArcFirebase = api;
@@ -233,6 +265,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   }
   #trainingPlanBtn:hover{border-color:var(--yellow);color:var(--yellow);}
   #trainingPlanBtn:disabled{opacity:.5;cursor:not-allowed;}
+  #plansLibraryBtn{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:16px;letter-spacing:0.4px;font-weight:600;
+    background:transparent;color:var(--chalk);border:1px solid var(--board-line);
+    padding:7px 14px;border-radius:8px;cursor:pointer;text-transform:uppercase;
+  }
+  #plansLibraryBtn:hover{border-color:var(--yellow);color:var(--yellow);}
+  #plansLibraryBtn:disabled{opacity:.5;cursor:not-allowed;}
   .speed-wrap{display:flex;flex-direction:column;gap:2px;min-width:110px;}
   .speed-wrap label{font-size:11px;color:var(--chalk-dim);text-transform:uppercase;letter-spacing:.06em;}
   input[type=range]{width:110px;accent-color:var(--yellow);}
@@ -418,6 +457,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     font-size:13.5px;padding:8px 10px;cursor:pointer;
   }
   .tp-picker-trigger:hover{border-color:var(--yellow);}
+  .tp-picker-trigger:disabled{opacity:.5;cursor:not-allowed;}
   .tp-picker-list{
     position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;
     background:var(--board-raised);border:1px solid var(--board-line);border-radius:8px;
@@ -450,6 +490,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     font-size:13.5px;padding:7px 9px;
   }
   .tp-notes-input{width:100%;min-height:50px;}
+  .tp-scores-edit-row{display:flex;flex-wrap:wrap;gap:8px;}
+  .tp-score-edit-field{display:flex;flex-direction:column;font-size:11px;color:var(--chalk-dim);gap:3px;}
+  .tp-score-edit-field .tp-number-input{width:56px;}
 
   #tpPrintView{display:none;}
   @media print{
@@ -498,7 +541,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     .tool-btn{font-size:13px;padding:7px 9px;gap:4px;}
     .hotkey{display:none;}
     .play-group{gap:8px;flex-wrap:wrap;}
-    #playBtn,#exportBtn,#libraryBtn,#loadDrillBtn,#trainingPlanBtn{font-size:13px;padding:7px 11px;}
+    #playBtn,#exportBtn,#libraryBtn,#loadDrillBtn,#trainingPlanBtn,#plansLibraryBtn{font-size:13px;padding:7px 11px;}
     .speed-wrap{min-width:70px;}
     input[type=range]{width:70px;}
     .toggle{font-size:11px;}
@@ -551,6 +594,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <button id="loadDrillBtn">Load Drill</button>
       <input type="file" id="loadDrillFile" accept="application/json" class="hidden">
       <button id="trainingPlanBtn">Training Plan</button>
+      <button id="plansLibraryBtn">Plans Library</button>
     </div>
   </header>
   <main>
@@ -629,7 +673,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         sets and balls for each, add notes, then export as a printable PDF (with every session's
         type, focus, tags, gate setup, and notes included, plus a QR code straight to each
         session's own GIF whenever it came from the shared Library) or as a standalone web page
-        with the actual GIFs animating.
+        with the actual GIFs animating. Hit <b>Save to Plans Library</b> to store the plan itself
+        — find it later in <b>Plans Library</b>, where anyone with the passphrase can open it to
+        record scores, while full editing stays reserved for signed-in team.
       </div>
     </aside>
   </main>
@@ -662,6 +708,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div id="tpDaysContainer"></div>
       <div id="tpExportRow" class="hidden">
         <div class="divider"></div>
+        <button id="tpSaveBtn" class="lib-action-btn" type="button">Save to Plans Library</button>
+        <span id="tpSaveStatus" class="lib-empty" style="padding:0;"></span>
         <button id="tpExportBtn" class="lib-action-btn" type="button">Export Plan (Print / Save as PDF)</button>
         <button id="tpExportWebBtn" class="lib-action-btn" type="button">Export Plan (Web View, with live GIFs)</button>
       </div>
@@ -669,6 +717,30 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   </div>
 </div>
 <div id="tpPrintView"></div>
+<div id="plansLibraryOverlay" class="modal-overlay hidden">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <div class="modal-title">Plans Library</div>
+      <button id="plansLibraryCloseBtn" class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="plTeamBar" class="lib-team-bar hidden">
+        <span id="plAuthStatus" class="lib-auth-status">Not signed in</span>
+      </div>
+      <div id="plPassGate" class="lib-pass-gate hidden">
+        <div class="field-label">Library passphrase</div>
+        <div class="lib-pass-row">
+          <input type="password" id="plPassInput" class="text-input" placeholder="Enter passphrase">
+          <button id="plPassUnlockBtn" class="lib-action-btn" type="button">Unlock</button>
+        </div>
+        <div id="plPassError" class="lib-pass-error"></div>
+      </div>
+      <div id="plContent" class="hidden">
+        <div id="plansList" class="library-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
 <div id="libraryOverlay" class="modal-overlay hidden">
   <div class="modal modal-wide">
     <div class="modal-header">
@@ -1597,7 +1669,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   libraryOverlay.addEventListener('click', (e)=>{ if(e.target===libraryOverlay) closeLibraryPanel(); });
 
   // ---------- training plan ----------
-  let trainingPlan = { name: '', days: [] };
+  let trainingPlan = { id: null, name: '', days: [] };
+  let tpReadOnly = false; // true when opened via passcode-only access to a saved plan: only Scores are editable
   let tpLibraryEntries = [];
   let tpTagFilter = null;
 
@@ -1636,7 +1709,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     let html = '<div class="wv-scores"><div class="wv-scores-label">Scores</div><div class="wv-scores-row">';
     for(let i=1;i<=n;i++){
       html += '<label class="wv-score-field">Set ' + i
-        + '<input type="text" class="wv-score-input" data-key="' + keyPrefix + '-set' + i + '" placeholder="\u2014"></label>';
+        + '<input type="text" class="wv-score-input" data-key="' + keyPrefix + '-set' + i + '" placeholder="\u2014">'
+        + '<span class="wv-sync-dot" title="Synced to shared Library"></span>'
+        + '</label>';
     }
     return html + '</div></div>';
   }
@@ -1705,7 +1780,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const oldDay = trainingPlan.days[d];
       const sessions = [];
       for(let s=0; s<perDay; s++){
-        sessions.push((oldDay && oldDay.sessions[s]) ? oldDay.sessions[s] : { libraryId:null, name:'', sets:'', balls:'', notes:'' });
+        sessions.push((oldDay && oldDay.sessions[s]) ? oldDay.sessions[s] : { libraryId:null, name:'', sets:'', balls:'', notes:'', scores:[] });
       }
       newDays.push({ sessions });
     }
@@ -1726,13 +1801,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     setsCol.innerHTML = '<div class="field-label">Sets</div>';
     const setsInput = document.createElement('input');
     setsInput.type = 'number'; setsInput.min = '0'; setsInput.className = 'tp-number-input'; setsInput.value = slot.sets || '';
-    setsInput.addEventListener('input', ()=>{ slot.sets = setsInput.value; });
+    setsInput.disabled = tpReadOnly;
+    setsInput.addEventListener('input', ()=>{ slot.sets = setsInput.value; renderTrainingPlanSlotDetails(slotEl, slot); });
     setsCol.appendChild(setsInput);
 
     const ballsCol = document.createElement('div'); ballsCol.className = 'field-col';
     ballsCol.innerHTML = '<div class="field-label">Balls</div>';
     const ballsInput = document.createElement('input');
     ballsInput.type = 'number'; ballsInput.min = '0'; ballsInput.className = 'tp-number-input'; ballsInput.value = slot.balls || '';
+    ballsInput.disabled = tpReadOnly;
     ballsInput.addEventListener('input', ()=>{ slot.balls = ballsInput.value; });
     ballsCol.appendChild(ballsInput);
 
@@ -1746,8 +1823,31 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     notesInput.className = 'text-input tp-notes-input';
     notesInput.placeholder = 'Notes for this session…';
     notesInput.value = slot.notes || '';
+    notesInput.disabled = tpReadOnly;
     notesInput.addEventListener('input', ()=>{ slot.notes = notesInput.value; });
     details.appendChild(notesInput);
+
+    // scores — always editable, regardless of read-only mode, since
+    // recording results is exactly what passcode-only access is for
+    if(!Array.isArray(slot.scores)) slot.scores = [];
+    const setCount = getSetCount(slot);
+    const scoresLabel = document.createElement('div');
+    scoresLabel.className = 'field-label'; scoresLabel.textContent = 'Scores';
+    details.appendChild(scoresLabel);
+    const scoresRow = document.createElement('div');
+    scoresRow.className = 'tp-scores-edit-row';
+    for(let i=0;i<setCount;i++){
+      const field = document.createElement('label');
+      field.className = 'tp-score-edit-field';
+      field.textContent = 'Set ' + (i+1);
+      const scoreInput = document.createElement('input');
+      scoreInput.type = 'text'; scoreInput.className = 'tp-number-input'; scoreInput.placeholder = '\u2014';
+      scoreInput.value = slot.scores[i] || '';
+      scoreInput.addEventListener('input', ()=>{ slot.scores[i] = scoreInput.value; });
+      field.appendChild(scoreInput);
+      scoresRow.appendChild(field);
+    }
+    details.appendChild(scoresRow);
 
     slotEl.appendChild(details);
   }
@@ -1803,7 +1903,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       list.appendChild(row);
     });
 
+    trigger.disabled = tpReadOnly;
     trigger.addEventListener('click', (e)=>{
+      if(tpReadOnly) return;
       e.stopPropagation();
       document.querySelectorAll('.tp-picker-list').forEach(l=>{ if(l!==list) l.classList.add('hidden'); });
       list.classList.toggle('hidden');
@@ -1962,9 +2064,14 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     setTimeout(()=>printView.classList.remove('printing'), 800);
   }
 
-  function buildWebViewDocument(bodyHtml){
+  function buildWebViewDocument(bodyHtml, fbConfig, scoreMeta){
     const planTitle = escapeHtml(trainingPlan.name || 'Training Plan');
-    return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + planTitle + '</title>'
+    const syncEnabled = !!fbConfig;
+    const hintText = syncEnabled
+      ? 'Click any GIF to view it larger. Scores you enter below are saved in this browser and synced to the shared Library automatically.'
+      : 'Click any GIF to view it larger. Scores you enter below are saved in this browser only (no shared Library was configured when this was exported).';
+
+    let out = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + planTitle + '</title>'
       + '<meta name="viewport" content="width=device-width, initial-scale=1"><style>'
       + 'body{background:#0F1E17;color:#F4EDE1;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;max-width:900px;margin:0 auto;padding:30px 20px;}'
       + 'h1{font-size:30px;margin-bottom:24px;}'
@@ -1978,7 +2085,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       + '.wv-sub{color:#E8B84B !important;font-weight:600;}'
       + '.wv-hint{font-size:11.5px;color:rgba(244,237,225,0.45);margin:-14px 0 24px;}'
       + '.wv-scores{margin-top:10px;padding-top:10px;border-top:1px solid rgba(244,237,225,0.15);}'
-      + '.wv-scores-label{font-size:11px;font-weight:600;color:rgba(244,237,225,0.55);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;}'
+      + '.wv-scores-label{font-size:11px;font-weight:600;color:rgba(244,237,225,0.55);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;display:flex;align-items:center;gap:6px;}'
+      + '.wv-sync-dot{width:6px;height:6px;border-radius:50%;background:rgba(244,237,225,0.3);flex:none;}'
+      + '.wv-sync-dot.synced{background:#54C77A;}'
       + '.wv-scores-row{display:flex;flex-wrap:wrap;gap:8px;}'
       + '.wv-score-field{display:flex;flex-direction:column;font-size:10.5px;color:rgba(244,237,225,0.7);gap:3px;}'
       + '.wv-score-input{width:56px;background:rgba(0,0,0,0.3);border:1px solid rgba(244,237,225,0.22);border-radius:5px;color:#F4EDE1;font-family:inherit;font-size:13px;padding:5px 6px;}'
@@ -1989,10 +2098,34 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       + '@media (max-width:600px){.wv-session{flex-direction:column;}.wv-gif{width:100%;}}'
       + '</style></head><body>'
       + '<h1>' + planTitle + '</h1>'
-      + '<p class="wv-hint">Click any GIF to view it larger. Scores you enter below are saved in this browser automatically.</p>'
+      + '<p class="wv-hint">' + escapeHtml(hintText) + '</p>'
       + bodyHtml
-      + '<div class="wv-lightbox" id="wvLightbox"><img id="wvLightboxImg" src="" alt=""></div>'
-      + '<script>'
+      + '<div class="wv-lightbox" id="wvLightbox"><img id="wvLightboxImg" src="" alt=""></div>';
+
+    if(syncEnabled){
+      out += '<script type="module">'
+        + 'import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";'
+        + 'import { getFirestore, doc as fsDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";'
+        + 'const cfg = ' + JSON.stringify(fbConfig) + ';'
+        + 'const meta = ' + JSON.stringify(scoreMeta || {}) + ';'
+        + 'const planName = ' + JSON.stringify(trainingPlan.name || 'Training Plan') + ';'
+        + 'try{'
+        + 'const app = initializeApp(cfg);'
+        + 'const db = getFirestore(app);'
+        + 'window.__submitScore = async function(key, value){'
+        + 'const m = meta[key] || {};'
+        + 'await setDoc(fsDoc(db, "scores", key), {'
+        + 'key: key, value: value, planName: planName,'
+        + 'sessionId: m.sessionId || null, sessionName: m.sessionName || "",'
+        + 'day: m.day || null, setIndex: m.setIndex || null,'
+        + 'updatedAt: Date.now()'
+        + '}, { merge: true });'
+        + '};'
+        + '}catch(e){ console.error("Score sync unavailable:", e); }'
+        + '<\/script>';
+    }
+
+    out += '<script>'
       + 'document.querySelectorAll(".wv-gif").forEach(function(img){'
       + 'img.addEventListener("click", function(){'
       + 'document.getElementById("wvLightboxImg").src = img.src;'
@@ -2001,17 +2134,30 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       + 'document.getElementById("wvLightbox").addEventListener("click", function(){'
       + 'this.classList.remove("open");'
       + '});'
+      + 'var scoreSyncTimers = {};'
       + 'document.querySelectorAll(".wv-score-input").forEach(function(inp){'
-      + 'var key = "arcScore_" + inp.dataset.key;'
-      + 'try{ var saved = localStorage.getItem(key); if(saved !== null) inp.value = saved; }catch(e){}'
-      + 'inp.addEventListener("input", function(){ try{ localStorage.setItem(key, inp.value); }catch(e){} });'
+      + 'var localKey = "arcScore_" + inp.dataset.key;'
+      + 'try{ var saved = localStorage.getItem(localKey); if(saved !== null) inp.value = saved; }catch(e){}'
+      + 'inp.addEventListener("input", function(){'
+      + 'try{ localStorage.setItem(localKey, inp.value); }catch(e){}'
+      + 'var dot = inp.parentElement.querySelector(".wv-sync-dot");'
+      + 'if(dot) dot.classList.remove("synced");'
+      + 'clearTimeout(scoreSyncTimers[inp.dataset.key]);'
+      + 'scoreSyncTimers[inp.dataset.key] = setTimeout(function(){'
+      + 'if(typeof window.__submitScore === "function"){'
+      + 'window.__submitScore(inp.dataset.key, inp.value).then(function(){ if(dot) dot.classList.add("synced"); }).catch(function(err){ console.error(err); });'
+      + '}'
+      + '}, 700);'
+      + '});'
       + '});'
       + '<\/script>'
       + '</body></html>';
+    return out;
   }
 
   async function buildTrainingPlanWebHtml(){
     let bodyHtml = '';
+    const scoreMeta = {};
     for(let di=0; di<trainingPlan.days.length; di++){
       const day = trainingPlan.days[di];
       const filled = day.sessions.filter(s=>s.libraryId);
@@ -2026,6 +2172,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
         const sessionMeta = parseDrillSession(entry);
         const keyPrefix = 'd' + di + '-s' + si + '-' + (slot.libraryId || 'x');
+        const setCount = getSetCount(slot);
+        for(let i=1;i<=setCount;i++){
+          scoreMeta[keyPrefix + '-set' + i] = {
+            sessionId: slot.libraryId || null,
+            sessionName: slot.name || 'Session',
+            day: di + 1,
+            setIndex: i
+          };
+        }
         bodyHtml += '<div class="wv-session">';
         if(imgSrc) bodyHtml += '<img class="wv-gif" src="' + imgSrc + '" alt="">';
         bodyHtml += '<div class="wv-session-body">' + buildSessionMetaHtml(slot, sessionMeta) + buildWebScoresHtml(slot, keyPrefix) + '</div>';
@@ -2033,7 +2188,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
       bodyHtml += '</section>';
     }
-    return buildWebViewDocument(bodyHtml);
+    const fb = await waitForFirebase();
+    const fbConfig = (fb && fb.config) ? fb.config : null;
+    return buildWebViewDocument(bodyHtml, fbConfig, scoreMeta);
   }
 
   async function exportTrainingPlanWeb(){
@@ -2062,18 +2219,39 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   }
 
   const trainingPlanOverlay = document.getElementById('trainingPlanOverlay');
-  function openTrainingPlanPanel(){
+  function updateTpSaveStatus(){
+    const el = document.getElementById('tpSaveStatus');
+    if(!el) return;
+    el.textContent = trainingPlan.id ? 'Saved to Plans Library' : 'Not yet saved';
+  }
+  async function openTrainingPlanPanel(loadedPlan){
     if(playing || exporting) return;
+    if(loadedPlan){
+      const fb = await waitForFirebase();
+      trainingPlan.id = loadedPlan.id;
+      trainingPlan.name = loadedPlan.name || '';
+      trainingPlan.days = loadedPlan.days || [];
+      // team can fully edit a saved plan; passcode-only access can only
+      // record scores, since planning decisions stay a team responsibility
+      tpReadOnly = !(fb && fb.currentUser);
+    } else {
+      tpReadOnly = false;
+    }
     trainingPlanOverlay.classList.remove('hidden');
     document.getElementById('tpName').value = trainingPlan.name;
+    document.getElementById('tpName').disabled = tpReadOnly;
+    document.getElementById('tpDays').disabled = tpReadOnly;
+    document.getElementById('tpSessionsPerDay').disabled = tpReadOnly;
+    document.getElementById('tpBuildBtn').disabled = tpReadOnly;
     if(trainingPlan.days.length){
       document.getElementById('tpDays').value = trainingPlan.days.length;
       document.getElementById('tpSessionsPerDay').value = trainingPlan.days[0].sessions.length;
       renderTrainingPlan();
     }
+    updateTpSaveStatus();
   }
   function closeTrainingPlanPanel(){ trainingPlanOverlay.classList.add('hidden'); }
-  document.getElementById('trainingPlanBtn').onclick = openTrainingPlanPanel;
+  document.getElementById('trainingPlanBtn').onclick = ()=> openTrainingPlanPanel();
   document.getElementById('tpCloseBtn').onclick = closeTrainingPlanPanel;
   trainingPlanOverlay.addEventListener('click', (e)=>{ if(e.target===trainingPlanOverlay) closeTrainingPlanPanel(); });
   document.getElementById('tpName').addEventListener('input', (e)=>{ trainingPlan.name = e.target.value; });
@@ -2083,6 +2261,123 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   };
   document.getElementById('tpExportBtn').onclick = exportTrainingPlan;
   document.getElementById('tpExportWebBtn').onclick = exportTrainingPlanWeb;
+  document.getElementById('tpSaveBtn').onclick = async ()=>{
+    const btn = document.getElementById('tpSaveBtn');
+    const original = btn.textContent;
+    btn.textContent = 'Saving\u2026'; btn.disabled = true;
+    try{
+      const fb = await waitForFirebase();
+      if(!fb || !fb.configured) throw new Error('Shared library is not configured yet.');
+      const id = await fb.savePlan({ id: trainingPlan.id, name: trainingPlan.name, days: trainingPlan.days });
+      trainingPlan.id = id;
+      updateTpSaveStatus();
+      flash('Training plan saved to the Plans Library.');
+    }catch(err){
+      console.error(err);
+      flash('Could not save this plan: ' + err.message);
+    } finally {
+      btn.textContent = original; btn.disabled = false;
+    }
+  };
+
+  // ---------- plans library ----------
+  const plansLibraryOverlay = document.getElementById('plansLibraryOverlay');
+  async function renderPlansLibrary(){
+    const teamBar = document.getElementById('plTeamBar');
+    const passGate = document.getElementById('plPassGate');
+    const content = document.getElementById('plContent');
+    const listEl = document.getElementById('plansList');
+
+    const fb = await waitForFirebase();
+    if(!fb || !fb.configured){
+      teamBar.classList.add('hidden'); passGate.classList.add('hidden');
+      content.classList.remove('hidden');
+      listEl.innerHTML = '<div class="lib-empty">Shared Plans Library isn\'t configured yet.</div>';
+      return;
+    }
+
+    teamBar.classList.remove('hidden');
+    document.getElementById('plAuthStatus').textContent = fb.currentUser
+      ? ('Signed in as ' + fb.currentUser.email)
+      : 'Not signed in \u2014 passcode access lets you open a plan to record scores only';
+
+    if(!libUnlocked && !fb.currentUser){
+      passGate.classList.remove('hidden');
+      content.classList.add('hidden');
+      return;
+    }
+    passGate.classList.add('hidden');
+    content.classList.remove('hidden');
+
+    let plans;
+    try{ plans = await fb.fetchPlans(); }
+    catch(err){ listEl.innerHTML = '<div class="lib-empty">Could not reach the shared library right now.</div>'; return; }
+    plans.sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
+
+    listEl.innerHTML = '';
+    if(plans.length===0){
+      listEl.innerHTML = '<div class="lib-empty">No training plans saved yet \u2014 build one and hit Save to Plans Library.</div>';
+      return;
+    }
+    plans.forEach(plan=>{
+      const item = document.createElement('div');
+      item.className = 'library-item';
+      const main = document.createElement('div');
+      main.className = 'library-item-main';
+      const nameEl = document.createElement('div'); nameEl.className = 'library-item-name';
+      nameEl.textContent = plan.name || 'Untitled plan';
+      const dateEl = document.createElement('div'); dateEl.className = 'library-item-date';
+      const dayCount = Array.isArray(plan.days) ? plan.days.length : 0;
+      dateEl.textContent = new Date(plan.updatedAt || plan.createdAt || Date.now()).toLocaleString()
+        + ' \u00b7 ' + dayCount + ' day' + (dayCount===1?'':'s');
+      main.appendChild(nameEl); main.appendChild(dateEl);
+
+      const actions = document.createElement('div'); actions.className = 'library-item-actions';
+      const openBtn = document.createElement('button');
+      openBtn.className = 'lib-action-btn'; openBtn.type = 'button';
+      openBtn.textContent = fb.currentUser ? 'Open (Edit)' : 'Open (Record Scores)';
+      openBtn.onclick = ()=>{ closePlansLibraryPanel(); openTrainingPlanPanel(plan); };
+      actions.appendChild(openBtn);
+      if(fb.currentUser){
+        const delBtn = document.createElement('button');
+        delBtn.className = 'lib-action-btn lib-action-danger'; delBtn.type = 'button'; delBtn.textContent = 'Delete';
+        delBtn.onclick = async ()=>{
+          if(!confirm('Delete this training plan? This cannot be undone.')) return;
+          try{ await fb.deletePlan(plan.id); renderPlansLibrary(); }
+          catch(err){ flash('Could not delete: ' + err.message); }
+        };
+        actions.appendChild(delBtn);
+      }
+      item.appendChild(main); item.appendChild(actions);
+      listEl.appendChild(item);
+    });
+  }
+  function openPlansLibraryPanel(){
+    if(playing || exporting) return;
+    plansLibraryOverlay.classList.remove('hidden');
+    renderPlansLibrary();
+  }
+  function closePlansLibraryPanel(){ plansLibraryOverlay.classList.add('hidden'); }
+  document.getElementById('plansLibraryBtn').onclick = openPlansLibraryPanel;
+  document.getElementById('plansLibraryCloseBtn').onclick = closePlansLibraryPanel;
+  plansLibraryOverlay.addEventListener('click', (e)=>{ if(e.target===plansLibraryOverlay) closePlansLibraryPanel(); });
+  document.getElementById('plPassUnlockBtn').onclick = async ()=>{
+    const val = document.getElementById('plPassInput').value;
+    const errEl = document.getElementById('plPassError');
+    const hash = await sha256Hex(val);
+    if(hash === LIBRARY_PASSPHRASE_HASH){
+      libUnlocked = true;
+      sessionStorage.setItem('arcLibraryUnlocked','1');
+      errEl.textContent = '';
+      document.getElementById('plPassInput').value = '';
+      renderPlansLibrary();
+    } else {
+      errEl.textContent = 'Incorrect passphrase.';
+    }
+  };
+  document.getElementById('plPassInput').addEventListener('keydown', (e)=>{
+    if(e.key==='Enter') document.getElementById('plPassUnlockBtn').click();
+  });
 
   // ---------- playback ----------
   let exporting = false;
@@ -2111,6 +2406,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     document.getElementById('libraryBtn').disabled = !on;
     document.getElementById('loadDrillBtn').disabled = !on;
     document.getElementById('trainingPlanBtn').disabled = !on;
+    document.getElementById('plansLibraryBtn').disabled = !on;
   }
   function easeInOutQuad(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
 
