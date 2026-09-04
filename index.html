@@ -108,6 +108,8 @@
     api.savePlan = async (planData)=>{
       const payload = {
         name: planData.name || 'Untitled plan',
+        focuses: planData.focuses || [],
+        description: planData.description || '',
         days: planData.days || [],
         updatedAt: Date.now()
       };
@@ -501,6 +503,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       display:block !important; position:static; background:#fff; color:#111;
       font-family:Georgia, 'Times New Roman', serif; padding:0; margin:0;
     }
+    .tp-print-focuses{font-size:12.5px;margin:0 0 4px;color:#333;}
+    .tp-print-description{font-size:12.5px;margin:0 0 20px;line-height:1.5;color:#333;max-width:640px;}
     .tp-print-day{page-break-inside:avoid;margin-bottom:28px;}
     .tp-print-day h2{font-size:20px;border-bottom:2px solid #111;padding-bottom:4px;margin-bottom:10px;}
     .tp-print-session{
@@ -690,6 +694,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div id="tpSetup">
         <div class="field-label">Plan name</div>
         <input type="text" id="tpName" class="text-input" placeholder="e.g. Preseason Week 1">
+
+        <div class="field-label">Focuses</div>
+        <div id="tpFocusesWrap" class="library-item-tags tags-editor-standalone"></div>
+
+        <div class="field-label">Description</div>
+        <textarea id="tpDescription" class="text-input" rows="3" placeholder="What this plan covers and who it's for…"></textarea>
+
         <div class="field-row">
           <div class="field-col">
             <div class="field-label">Days</div>
@@ -1669,7 +1680,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   libraryOverlay.addEventListener('click', (e)=>{ if(e.target===libraryOverlay) closeLibraryPanel(); });
 
   // ---------- training plan ----------
-  let trainingPlan = { id: null, name: '', days: [] };
+  let trainingPlan = { id: null, name: '', focuses: [], description: '', days: [] };
   let tpReadOnly = false; // true when opened via passcode-only access to a saved plan: only Scores are editable
   let tpLibraryEntries = [];
   let tpTagFilter = null;
@@ -1772,6 +1783,41 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     }
   }
 
+  function renderTpFocuses(){
+    const wrap = document.getElementById('tpFocusesWrap');
+    wrap.innerHTML = '';
+    trainingPlan.focuses.forEach(focus=>{
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.appendChild(document.createTextNode(focus));
+      if(!tpReadOnly){
+        const rm = document.createElement('button');
+        rm.className = 'tag-remove'; rm.type = 'button'; rm.textContent = '\u00d7';
+        rm.onclick = ()=>{
+          trainingPlan.focuses = trainingPlan.focuses.filter(f=>f!==focus);
+          renderTpFocuses();
+        };
+        chip.appendChild(rm);
+      }
+      wrap.appendChild(chip);
+    });
+    if(!tpReadOnly){
+      const input = document.createElement('input');
+      input.type = 'text'; input.className = 'tag-input'; input.placeholder = '+ focus';
+      input.addEventListener('keydown', (e)=>{
+        if(e.key !== 'Enter') return;
+        e.preventDefault();
+        const val = input.value.trim();
+        if(val && !trainingPlan.focuses.includes(val)){
+          trainingPlan.focuses.push(val);
+          renderTpFocuses();
+        } else {
+          input.value = '';
+        }
+      });
+      wrap.appendChild(input);
+    }
+  }
   function rebuildTrainingPlanStructure(){
     const days = Math.max(1, Math.min(30, Number(document.getElementById('tpDays').value)||1));
     const perDay = Math.max(1, Math.min(8, Number(document.getElementById('tpSessionsPerDay').value)||1));
@@ -2020,7 +2066,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     // sign-in — it just doesn't exist for sessions that were only ever
     // saved locally, since there's nothing hosted to point at.
     let anyMissingLink = false;
-    let html = '<h1 style="font-size:26px;margin:0 0 18px;">' + escapeHtml(trainingPlan.name || 'Training Plan') + '</h1>';
+    let html = '<h1 style="font-size:26px;margin:0 0 8px;">' + escapeHtml(trainingPlan.name || 'Training Plan') + '</h1>';
+    if(trainingPlan.focuses && trainingPlan.focuses.length){
+      html += '<p class="tp-print-focuses"><strong>Focuses:</strong> ' + trainingPlan.focuses.map(escapeHtml).join(', ') + '</p>';
+    }
+    if(trainingPlan.description){
+      html += '<p class="tp-print-description">' + escapeHtml(trainingPlan.description) + '</p>';
+    }
     try{
       for(let di=0; di<trainingPlan.days.length; di++){
         const day = trainingPlan.days[di];
@@ -2064,17 +2116,19 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     setTimeout(()=>printView.classList.remove('printing'), 800);
   }
 
-  function buildWebViewDocument(bodyHtml, fbConfig, scoreMeta){
+  function buildWebViewDocument(bodyHtml, fbConfig, scoreMeta, planId){
     const planTitle = escapeHtml(trainingPlan.name || 'Training Plan');
-    const syncEnabled = !!fbConfig;
+    // scores now write straight into this plan's own saved document, so
+    // syncing only makes sense once the plan actually has one
+    const syncEnabled = !!fbConfig && !!planId;
     const hintText = syncEnabled
-      ? 'Click any GIF to view it larger. Scores you enter below are saved in this browser and synced to the shared Library automatically.'
-      : 'Click any GIF to view it larger. Scores you enter below are saved in this browser only (no shared Library was configured when this was exported).';
+      ? 'Click any GIF to view it larger. Scores you enter below are saved in this browser and synced into this plan in the Plans Library automatically.'
+      : 'Click any GIF to view it larger. Scores you enter below are saved in this browser only (this plan wasn\'t saved to the Plans Library when exported, so there\'s nothing to sync to).';
 
     let out = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + planTitle + '</title>'
       + '<meta name="viewport" content="width=device-width, initial-scale=1"><style>'
       + 'body{background:#0F1E17;color:#F4EDE1;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;max-width:900px;margin:0 auto;padding:30px 20px;}'
-      + 'h1{font-size:30px;margin-bottom:24px;}'
+      + 'h1{font-size:30px;margin-bottom:6px;}'
       + '.wv-day{margin-bottom:36px;}'
       + '.wv-day h2{border-bottom:2px solid #E8B84B;padding-bottom:6px;color:#E8B84B;font-size:20px;}'
       + '.wv-session{display:flex;align-items:flex-start;gap:18px;background:rgba(255,255,255,0.04);border:1px solid rgba(244,237,225,0.12);border-radius:10px;padding:16px;margin-bottom:16px;}'
@@ -2083,7 +2137,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       + '.wv-session-body h3{margin:0 0 6px;font-size:18px;}'
       + '.wv-session-body p{margin:3px 0;font-size:13.5px;line-height:1.5;color:rgba(244,237,225,0.85);}'
       + '.wv-sub{color:#E8B84B !important;font-weight:600;}'
-      + '.wv-hint{font-size:11.5px;color:rgba(244,237,225,0.45);margin:-14px 0 24px;}'
+      + '.wv-hint{font-size:11.5px;color:rgba(244,237,225,0.45);margin:0 0 24px;}'
       + '.wv-scores{margin-top:10px;padding-top:10px;border-top:1px solid rgba(244,237,225,0.15);}'
       + '.wv-scores-label{font-size:11px;font-weight:600;color:rgba(244,237,225,0.55);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;display:flex;align-items:center;gap:6px;}'
       + '.wv-sync-dot{width:6px;height:6px;border-radius:50%;background:rgba(244,237,225,0.3);flex:none;}'
@@ -2095,9 +2149,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       + '.wv-lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:999;align-items:center;justify-content:center;padding:24px;cursor:zoom-out;}'
       + '.wv-lightbox.open{display:flex;}'
       + '.wv-lightbox img{max-width:95vw;max-height:95vh;border-radius:8px;box-shadow:0 24px 60px rgba(0,0,0,0.6);}'
+      + '.wv-focuses{font-size:13px;color:#E8B84B;font-weight:600;margin:0 0 6px;}'
+      + '.wv-description{font-size:14px;color:rgba(244,237,225,0.8);line-height:1.6;margin:0 0 22px;max-width:640px;}'
       + '@media (max-width:600px){.wv-session{flex-direction:column;}.wv-gif{width:100%;}}'
       + '</style></head><body>'
       + '<h1>' + planTitle + '</h1>'
+      + (trainingPlan.focuses && trainingPlan.focuses.length ? '<p class="wv-focuses">' + trainingPlan.focuses.map(escapeHtml).join(' \u00b7 ') + '</p>' : '')
+      + (trainingPlan.description ? '<p class="wv-description">' + escapeHtml(trainingPlan.description) + '</p>' : '')
       + '<p class="wv-hint">' + escapeHtml(hintText) + '</p>'
       + bodyHtml
       + '<div class="wv-lightbox" id="wvLightbox"><img id="wvLightboxImg" src="" alt=""></div>';
@@ -2105,21 +2163,30 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     if(syncEnabled){
       out += '<script type="module">'
         + 'import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";'
-        + 'import { getFirestore, doc as fsDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";'
+        + 'import { getFirestore, doc as fsDoc, runTransaction } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";'
         + 'const cfg = ' + JSON.stringify(fbConfig) + ';'
         + 'const meta = ' + JSON.stringify(scoreMeta || {}) + ';'
-        + 'const planName = ' + JSON.stringify(trainingPlan.name || 'Training Plan') + ';'
+        + 'const planId = ' + JSON.stringify(planId) + ';'
         + 'try{'
         + 'const app = initializeApp(cfg);'
         + 'const db = getFirestore(app);'
+        + 'const planRef = fsDoc(db, "trainingPlans", planId);'
+        // a transaction (not a plain read-then-write) so two people
+        // recording different scores around the same time don't clobber
+        // each other's entries
         + 'window.__submitScore = async function(key, value){'
-        + 'const m = meta[key] || {};'
-        + 'await setDoc(fsDoc(db, "scores", key), {'
-        + 'key: key, value: value, planName: planName,'
-        + 'sessionId: m.sessionId || null, sessionName: m.sessionName || "",'
-        + 'day: m.day || null, setIndex: m.setIndex || null,'
-        + 'updatedAt: Date.now()'
-        + '}, { merge: true });'
+        + 'const m = meta[key]; if(!m) return;'
+        + 'await runTransaction(db, async function(tx){'
+        + 'const snap = await tx.get(planRef);'
+        + 'if(!snap.exists()) return;'
+        + 'const data = snap.data();'
+        + 'const days = data.days || [];'
+        + 'const day = days[m.dayIndex]; if(!day || !day.sessions) return;'
+        + 'const sess = day.sessions[m.sessionIndex]; if(!sess) return;'
+        + 'if(!Array.isArray(sess.scores)) sess.scores = [];'
+        + 'sess.scores[m.setIndex] = value;'
+        + 'tx.update(planRef, { days: days, updatedAt: Date.now() });'
+        + '});'
         + '};'
         + '}catch(e){ console.error("Score sync unavailable:", e); }'
         + '<\/script>';
@@ -2156,15 +2223,28 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   }
 
   async function buildTrainingPlanWebHtml(){
+    // scores now sync straight into this plan's own Firestore document, so
+    // it needs to actually exist first — save it automatically if it
+    // hasn't been saved yet, so exporting always "just works"
+    const fb = await waitForFirebase();
+    if(fb && fb.configured && !trainingPlan.id){
+      try{
+        trainingPlan.id = await fb.savePlan({ id: null, name: trainingPlan.name, focuses: trainingPlan.focuses, description: trainingPlan.description, days: trainingPlan.days });
+        updateTpSaveStatus();
+      }catch(err){ console.error('Could not auto-save plan before export:', err); }
+    }
+
     let bodyHtml = '';
     const scoreMeta = {};
     for(let di=0; di<trainingPlan.days.length; di++){
       const day = trainingPlan.days[di];
-      const filled = day.sessions.filter(s=>s.libraryId);
-      if(filled.length===0) continue;
+      if(!day.sessions.some(s=>s.libraryId)) continue;
       bodyHtml += '<section class="wv-day"><h2>Day ' + (di+1) + '</h2>';
-      for(let si=0; si<filled.length; si++){
-        const slot = filled[si];
+      // iterate the real array so indices line up with where scores get
+      // written back in Firestore — filtering would renumber slots
+      for(let si=0; si<day.sessions.length; si++){
+        const slot = day.sessions[si];
+        if(!slot.libraryId) continue;
         const entry = tpLibraryEntries.find(e=>e.id===slot.libraryId);
         let imgSrc = '';
         if(entry){
@@ -2174,12 +2254,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         const keyPrefix = 'd' + di + '-s' + si + '-' + (slot.libraryId || 'x');
         const setCount = getSetCount(slot);
         for(let i=1;i<=setCount;i++){
-          scoreMeta[keyPrefix + '-set' + i] = {
-            sessionId: slot.libraryId || null,
-            sessionName: slot.name || 'Session',
-            day: di + 1,
-            setIndex: i
-          };
+          scoreMeta[keyPrefix + '-set' + i] = { dayIndex: di, sessionIndex: si, setIndex: i-1 };
         }
         bodyHtml += '<div class="wv-session">';
         if(imgSrc) bodyHtml += '<img class="wv-gif" src="' + imgSrc + '" alt="">';
@@ -2188,9 +2263,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
       bodyHtml += '</section>';
     }
-    const fb = await waitForFirebase();
     const fbConfig = (fb && fb.config) ? fb.config : null;
-    return buildWebViewDocument(bodyHtml, fbConfig, scoreMeta);
+    return buildWebViewDocument(bodyHtml, fbConfig, scoreMeta, trainingPlan.id || null);
   }
 
   async function exportTrainingPlanWeb(){
@@ -2230,6 +2304,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const fb = await waitForFirebase();
       trainingPlan.id = loadedPlan.id;
       trainingPlan.name = loadedPlan.name || '';
+      trainingPlan.focuses = loadedPlan.focuses || [];
+      trainingPlan.description = loadedPlan.description || '';
       trainingPlan.days = loadedPlan.days || [];
       // team can fully edit a saved plan; passcode-only access can only
       // record scores, since planning decisions stay a team responsibility
@@ -2240,6 +2316,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     trainingPlanOverlay.classList.remove('hidden');
     document.getElementById('tpName').value = trainingPlan.name;
     document.getElementById('tpName').disabled = tpReadOnly;
+    document.getElementById('tpDescription').value = trainingPlan.description;
+    document.getElementById('tpDescription').disabled = tpReadOnly;
+    renderTpFocuses();
     document.getElementById('tpDays').disabled = tpReadOnly;
     document.getElementById('tpSessionsPerDay').disabled = tpReadOnly;
     document.getElementById('tpBuildBtn').disabled = tpReadOnly;
@@ -2255,6 +2334,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   document.getElementById('tpCloseBtn').onclick = closeTrainingPlanPanel;
   trainingPlanOverlay.addEventListener('click', (e)=>{ if(e.target===trainingPlanOverlay) closeTrainingPlanPanel(); });
   document.getElementById('tpName').addEventListener('input', (e)=>{ trainingPlan.name = e.target.value; });
+  document.getElementById('tpDescription').addEventListener('input', (e)=>{ trainingPlan.description = e.target.value; });
   document.getElementById('tpBuildBtn').onclick = ()=>{
     rebuildTrainingPlanStructure();
     renderTrainingPlan();
@@ -2268,7 +2348,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     try{
       const fb = await waitForFirebase();
       if(!fb || !fb.configured) throw new Error('Shared library is not configured yet.');
-      const id = await fb.savePlan({ id: trainingPlan.id, name: trainingPlan.name, days: trainingPlan.days });
+      const id = await fb.savePlan({ id: trainingPlan.id, name: trainingPlan.name, focuses: trainingPlan.focuses, description: trainingPlan.description, days: trainingPlan.days });
       trainingPlan.id = id;
       updateTpSaveStatus();
       flash('Training plan saved to the Plans Library.');
