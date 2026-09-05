@@ -246,6 +246,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   }
   #exportBtn:hover{border-color:var(--yellow);color:var(--yellow);}
   #exportBtn:disabled{opacity:.5;cursor:not-allowed;}
+  #saveMirrorBtn{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:16px;letter-spacing:0.4px;font-weight:600;
+    background:transparent;color:var(--chalk);border:1px solid var(--board-line);
+    padding:7px 14px;border-radius:8px;cursor:pointer;text-transform:uppercase;
+  }
+  #saveMirrorBtn:hover:not(:disabled){border-color:var(--yellow);color:var(--yellow);}
+  #saveMirrorBtn:disabled{opacity:.4;cursor:not-allowed;}
   #libraryBtn{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:16px;letter-spacing:0.4px;font-weight:600;
     background:transparent;color:var(--chalk);border:1px solid var(--board-line);
@@ -545,7 +552,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     .tool-btn{font-size:13px;padding:7px 9px;gap:4px;}
     .hotkey{display:none;}
     .play-group{gap:8px;flex-wrap:wrap;}
-    #playBtn,#exportBtn,#libraryBtn,#loadDrillBtn,#trainingPlanBtn,#plansLibraryBtn{font-size:13px;padding:7px 11px;}
+    #playBtn,#exportBtn,#libraryBtn,#loadDrillBtn,#trainingPlanBtn,#plansLibraryBtn,#saveMirrorBtn{font-size:13px;padding:7px 11px;}
     .speed-wrap{min-width:70px;}
     input[type=range]{width:70px;}
     .toggle{font-size:11px;}
@@ -594,6 +601,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       </div>
       <button id="playBtn">▶ Play</button>
       <button id="exportBtn">Export GIF</button>
+      <button id="saveMirrorBtn" disabled>Mirror</button>
       <button id="libraryBtn">Library</button>
       <button id="loadDrillBtn">Load Drill</button>
       <input type="file" id="loadDrillFile" accept="application/json" class="hidden">
@@ -626,6 +634,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
         <div class="field-label">Tags</div>
         <div id="sessionTagsWrap" class="library-item-tags tags-editor-standalone"></div>
+
+        <div class="field-label">Side</div>
+        <div class="radio-group" id="sessionSideGroup">
+          <label class="radio-option"><input type="radio" name="sessionSide" value="left"> Left side</label>
+          <label class="radio-option"><input type="radio" name="sessionSide" value="right"> Right side</label>
+          <label class="radio-option"><input type="radio" name="sessionSide" value="both" checked> Both sides</label>
+        </div>
 
         <div class="divider"></div>
 
@@ -881,6 +896,21 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       g.label = EXCLUDED_OIDS.has(g._oid) ? null : String(labelSequence[n++]);
     }
   })();
+  // maps each gate's array index to whichever gate sits at its mirror-image
+  // position across the field's vertical center line — computed from
+  // geometry, not the numbering scheme, so it stays correct even if the
+  // gate layout or numbering changes later
+  const GATE_MIRROR_MAP = gatePositions.map(g=>{
+    const midX = (g.x1+g.x2)/2, midY = (g.y1+g.y2)/2;
+    const targetX = 2*CX - midX;
+    let bestJ = 0, bestDist = Infinity;
+    gatePositions.forEach((g2,j)=>{
+      const midX2 = (g2.x1+g2.x2)/2, midY2 = (g2.y1+g2.y2)/2;
+      const d = Math.hypot(midX2-targetX, midY2-midY);
+      if(d < bestDist){ bestDist = d; bestJ = j; }
+    });
+    return bestJ;
+  });
   const CYCLE = ['off','green','blue','yellow'];
   function cycleGate(g){
     const gates = state.steps[state.currentStep].gates;
@@ -919,7 +949,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     loop: false,
     speed: 1.2,
     session: {
-      name:'', type:'', focus:'', gateTiming:'before', notes:'', tags: [],
+      name:'', type:'', focus:'', gateTiming:'before', notes:'', tags: [], side:'both',
       gatesSelected: new Array(18).fill(false),
       numberOfGates: new Array(3).fill(false) // index0=1, index1=2, index2=3
     }
@@ -950,6 +980,39 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     const firstStep = state.steps[0];
     const b = firstStep && firstStep.objects.find(o=>o.type==='ball');
     return b ? {x:b.x, y:b.y} : {x:CX, y:PY+PH-16};
+  }
+
+  // ---------- mirroring (for Save a Mirror) ----------
+  function mirrorObject(o){
+    const m = { ...o, x: 2*CX - o.x };
+    if(o.type==='player'){
+      if(typeof o.rotation === 'number') m.rotation = -o.rotation;
+      if(o.receivingFoot==='left') m.receivingFoot = 'right';
+      else if(o.receivingFoot==='right') m.receivingFoot = 'left';
+    }
+    if(o.type==='ball' && o.attachedTo){
+      const foot = o.attachedTo.foot==='left' ? 'right' : (o.attachedTo.foot==='right' ? 'left' : o.attachedTo.foot);
+      m.attachedTo = { playerId: o.attachedTo.playerId, foot };
+    }
+    return m;
+  }
+  function mirrorGatesArray(gatesArr){
+    return GATE_MIRROR_MAP.map(mirrorIdx => gatesArr[mirrorIdx]);
+  }
+  function computeMirroredSteps(){
+    return state.steps.map(step=>({
+      objects: step.objects.map(mirrorObject),
+      gates: mirrorGatesArray(step.gates)
+    }));
+  }
+  function computeMirroredSession(){
+    const s = JSON.parse(JSON.stringify(state.session));
+    s.side = s.side==='left' ? 'right' : (s.side==='right' ? 'left' : s.side);
+    return s;
+  }
+  function updateSaveMirrorBtnState(){
+    const btn = document.getElementById('saveMirrorBtn');
+    if(btn) btn.disabled = (state.session.side !== 'left' && state.session.side !== 'right');
   }
   function addObject(type, x, y){
     let obj;
@@ -1250,7 +1313,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     state.steps = data.steps;
     state.currentStep = 0;
     state.session = Object.assign(
-      { name:'', type:'', focus:'', gateTiming:'before', notes:'', tags:[],
+      { name:'', type:'', focus:'', gateTiming:'before', notes:'', tags:[], side:'both',
         gatesSelected:new Array(18).fill(false), numberOfGates:new Array(3).fill(false) },
       data.session || {}
     );
@@ -1258,11 +1321,17 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     state.nextCone = data.nextCone || 1;
     state.nextBall = data.nextBall || 1;
 
+    syncSessionSettingsUI();
+    render();
+  }
+  function syncSessionSettingsUI(){
     document.getElementById('sessionName').value = state.session.name;
     document.getElementById('sessionType').value = state.session.type;
     document.getElementById('sessionFocus').value = state.session.focus;
     document.getElementById('sessionNotes').value = state.session.notes;
     document.querySelectorAll('input[name="gateTiming"]').forEach(r=>{ r.checked = r.value===state.session.gateTiming; });
+    document.querySelectorAll('input[name="sessionSide"]').forEach(r=>{ r.checked = r.value===state.session.side; });
+    updateSaveMirrorBtnState();
     gatesSelectedGrid.querySelectorAll('input').forEach(cb=>{
       cb.checked = state.session.gatesSelected[Number(cb.dataset.gateNum)-1];
     });
@@ -1271,7 +1340,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     });
     renderSessionTags();
     brandDrillName.textContent = state.session.name;
-    render();
   }
   function loadDrillFromFile(file){
     const reader = new FileReader();
@@ -1310,6 +1378,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   document.getElementById('sessionNotes').addEventListener('input', (e)=>{ state.session.notes = e.target.value; });
   document.querySelectorAll('input[name="gateTiming"]').forEach(r=>{
     r.addEventListener('change', (e)=>{ if(e.target.checked) state.session.gateTiming = e.target.value; });
+  });
+  document.querySelectorAll('input[name="sessionSide"]').forEach(r=>{
+    r.addEventListener('change', (e)=>{
+      if(e.target.checked){ state.session.side = e.target.value; updateSaveMirrorBtnState(); }
+    });
   });
 
   // ---------- gif library ----------
@@ -1754,6 +1827,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if(sub) html += '<p class="wv-sub">' + sub + '</p>';
       if(sessionMeta.tags && sessionMeta.tags.length){
         html += '<p><strong>Tags:</strong> ' + sessionMeta.tags.map(escapeHtml).join(', ') + '</p>';
+      }
+      if(sessionMeta.side && sessionMeta.side !== 'both'){
+        html += '<p><strong>Side:</strong> ' + (sessionMeta.side==='left' ? 'Left side' : 'Right side') + '</p>';
       }
     }
     html += '<p><strong>Sets:</strong> ' + escapeHtml(slot.sets || '\u2014') +
@@ -2532,6 +2608,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     document.getElementById('loadDrillBtn').disabled = !on;
     document.getElementById('trainingPlanBtn').disabled = !on;
     document.getElementById('plansLibraryBtn').disabled = !on;
+    if(on) updateSaveMirrorBtnState();
+    else document.getElementById('saveMirrorBtn').disabled = true;
   }
   function easeInOutQuad(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
 
@@ -2700,80 +2778,109 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     return gifWorkerUrl;
   }
   const exportBtn = document.getElementById('exportBtn');
-  exportBtn.onclick = async ()=>{
-    if(playing || exporting) return;
-    if(state.steps.length<2){ flash('Add at least two steps to export an animation.'); return; }
-    exporting = true;
-    playBtn.disabled = true;
-    setControlsEnabled(false);
-    const originalLabel = exportBtn.textContent;
-    exportBtn.textContent = 'Preparing…';
-    try{
-      const workerScript = await getGifWorkerUrl();
-      const gif = new GIF({ workers: 2, quality: 10, workerScript, width: exportCanvas.width, height: exportCanvas.height, repeat: 0, background: getVar('--board') });
-      const fps = 20;
-      const segments = state.steps.length-1;
-      for(let seg=0; seg<segments; seg++){
-        const fromObjs = state.steps[seg].objects, toObjs = state.steps[seg+1].objects;
-        const frames = Math.max(2, Math.round(state.speed*fps));
-        for(let f=0; f<=frames; f++){
-          const te = easeInOutQuad(f/frames);
-          drawFrame(interpolate(fromObjs, toObjs, te), state.steps[seg+1].gates);
-          gif.addFrame(composeExportFrame(), { copy:true, delay: 1000/fps });
-        }
-        exportBtn.textContent = `Rendering ${Math.round(((seg+1)/segments)*100)}%`;
-      }
-      gif.on('progress', p=>{ exportBtn.textContent = `Encoding ${Math.round(p*100)}%`; });
-      gif.on('finished', async blob=>{
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = 'arc-session-builder.gif';
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        setTimeout(()=>URL.revokeObjectURL(url), 4000);
-
-        let saveMsg = '';
+  const saveMirrorBtn = document.getElementById('saveMirrorBtn');
+  // shared by both Export GIF and Save a Mirror — properly awaitable
+  // (including gif.js's event-based completion), so a caller can safely
+  // swap state back afterward without racing the still-in-progress export
+  function runGifExport(btn){
+    return new Promise(resolve=>{
+      if(playing || exporting){ resolve(false); return; }
+      if(state.steps.length<2){ flash('Add at least two steps to export an animation.'); resolve(false); return; }
+      exporting = true;
+      playBtn.disabled = true;
+      setControlsEnabled(false);
+      const originalLabel = btn.textContent;
+      btn.textContent = 'Preparing…';
+      (async ()=>{
         try{
-          const fb = await waitForFirebase();
-          const tagsAtExport = [...state.session.tags];
-          const drillData = captureDrillData();
-          if(fb && fb.configured && fb.currentUser){
-            await fb.saveSession({ name: state.session.name, tags: tagsAtExport, blob, drillData });
-            saveMsg = 'GIF downloaded and pushed to the shared Library.';
-          } else {
-            await libSave({
-              id: 'gif_' + Date.now() + '_' + Math.random().toString(36).slice(2,8),
-              name: state.session.name || 'Untitled drill',
-              blob: blob, tags: tagsAtExport, createdAt: Date.now(), drillData
-            });
-            saveMsg = (fb && fb.configured)
-              ? 'GIF downloaded and saved locally — sign in under Library \u2192 Team sign-in to push it to the shared Library.'
-              : 'GIF downloaded and saved to your local Library.';
+          const workerScript = await getGifWorkerUrl();
+          const gif = new GIF({ workers: 2, quality: 10, workerScript, width: exportCanvas.width, height: exportCanvas.height, repeat: 0, background: getVar('--board') });
+          const fps = 20;
+          const segments = state.steps.length-1;
+          for(let seg=0; seg<segments; seg++){
+            const fromObjs = state.steps[seg].objects, toObjs = state.steps[seg+1].objects;
+            const frames = Math.max(2, Math.round(state.speed*fps));
+            for(let f=0; f<=frames; f++){
+              const te = easeInOutQuad(f/frames);
+              drawFrame(interpolate(fromObjs, toObjs, te), state.steps[seg+1].gates);
+              gif.addFrame(composeExportFrame(), { copy:true, delay: 1000/fps });
+            }
+            btn.textContent = `Rendering ${Math.round(((seg+1)/segments)*100)}%`;
           }
-        } catch(err){
-          console.error('Could not save to library:', err);
-          saveMsg = 'GIF downloaded (could not save to a Library right now).';
-        }
+          gif.on('progress', p=>{ btn.textContent = `Encoding ${Math.round(p*100)}%`; });
+          gif.on('finished', async blob=>{
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const fileBase = (state.session.name || 'arc-session-builder').replace(/[^a-z0-9\-_]+/gi,'-');
+            a.href = url; a.download = fileBase + '.gif';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(()=>URL.revokeObjectURL(url), 4000);
 
-        exporting = false;
-        playBtn.disabled = false;
-        setControlsEnabled(true);
-        exportBtn.textContent = originalLabel;
-        render();
-        flash(saveMsg);
-      });
-      gif.render();
-    } catch(err){
-      console.error(err);
-      exporting = false;
-      playBtn.disabled = false;
-      setControlsEnabled(true);
-      exportBtn.textContent = originalLabel;
-      render();
-      const blocked = err && (err.name === 'SecurityError' || /worker/i.test(err.message||''));
-      flash(blocked
-        ? 'GIF export needs Web Workers, which this preview blocks — open the downloaded HTML file directly in a browser tab and try again.'
-        : 'GIF export failed — please try again.');
+            let saveMsg = '';
+            try{
+              const fb = await waitForFirebase();
+              const tagsAtExport = [...state.session.tags];
+              const drillData = captureDrillData();
+              if(fb && fb.configured && fb.currentUser){
+                await fb.saveSession({ name: state.session.name, tags: tagsAtExport, blob, drillData });
+                saveMsg = 'GIF downloaded and pushed to the shared Library.';
+              } else {
+                await libSave({
+                  id: 'gif_' + Date.now() + '_' + Math.random().toString(36).slice(2,8),
+                  name: state.session.name || 'Untitled drill',
+                  blob: blob, tags: tagsAtExport, createdAt: Date.now(), drillData
+                });
+                saveMsg = (fb && fb.configured)
+                  ? 'GIF downloaded and saved locally — sign in under Library \u2192 Team sign-in to push it to the shared Library.'
+                  : 'GIF downloaded and saved to your local Library.';
+              }
+            } catch(err){
+              console.error('Could not save to library:', err);
+              saveMsg = 'GIF downloaded (could not save to a Library right now).';
+            }
+
+            exporting = false;
+            playBtn.disabled = false;
+            setControlsEnabled(true);
+            btn.textContent = originalLabel;
+            flash(saveMsg);
+            resolve(true);
+          });
+          gif.render();
+        } catch(err){
+          console.error(err);
+          exporting = false;
+          playBtn.disabled = false;
+          setControlsEnabled(true);
+          btn.textContent = originalLabel;
+          const blocked = err && (err.name === 'SecurityError' || /worker/i.test(err.message||''));
+          flash(blocked
+            ? 'GIF export needs Web Workers, which this preview blocks — open the downloaded HTML file directly in a browser tab and try again.'
+            : 'GIF export failed — please try again.');
+          resolve(false);
+        }
+      })();
+    });
+  }
+  exportBtn.onclick = async ()=>{
+    await runGifExport(exportBtn);
+    render();
+  };
+  saveMirrorBtn.onclick = ()=>{
+    if(playing || exporting) return;
+    if(state.session.side !== 'left' && state.session.side !== 'right'){
+      flash('Choose Left side or Right side before saving a mirror.');
+      return;
     }
+    // transforms the live drill in place — objects, gates, and the side
+    // field all flip — so the person can review, tweak, and rename before
+    // exporting normally with the regular Export GIF button. Clicking this
+    // again mirrors it right back, which doubles as an easy undo.
+    state.steps = computeMirroredSteps();
+    state.session = computeMirroredSession();
+    syncSessionSettingsUI();
+    render();
+    flash('Session mirrored — review the fields, then export whenever you\'re ready.');
   };
 
   // ---------- drawing ----------
