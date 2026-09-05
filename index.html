@@ -332,6 +332,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   }
   #resetDrillBtn:hover{border-color:var(--yellow);color:var(--yellow);}
   #resetDrillBtn:disabled{opacity:.4;cursor:not-allowed;}
+  #resetAllBtn{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:17px;letter-spacing:.04em;
+    background:transparent;border:1px solid var(--board-line);color:var(--chalk-dim);
+    padding:9px;border-radius:8px;cursor:pointer;text-transform:uppercase;
+  }
+  #resetAllBtn:hover{border-color:var(--danger);color:var(--danger);}
+  #resetAllBtn:disabled{opacity:.4;cursor:not-allowed;}
   .divider{height:1px;background:var(--board-line);margin:6px 0;}
   .hint{font-size:11.5px;line-height:1.5;color:var(--chalk-dim);}
   .hint b{color:var(--chalk);}
@@ -619,6 +626,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <button id="addStepBtn">+ Add step</button>
       <div class="divider"></div>
       <button id="resetDrillBtn">Reset ball</button>
+      <button id="resetAllBtn">Reset drill</button>
       <div class="divider"></div>
 
       <div class="side-title">Session</div>
@@ -1240,6 +1248,21 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     step.gates = new Array(gatePositions.length).fill('off');
     addObject('ball', CX, PY+PH-16);
     flash('Ball reset, gates cleared, receiving feet cleared.');
+  };
+  document.getElementById('resetAllBtn').onclick = ()=>{
+    if(playing || exporting) return;
+    if(!confirm('Reset the whole drill? This deletes every step and clears all session fields — this cannot be undone.')) return;
+    state.steps = [{ objects: [], gates: new Array(gatePositions.length).fill('off') }];
+    state.currentStep = 0;
+    state.nextPlayer = 1; state.nextCone = 1; state.nextBall = 1;
+    state.session = {
+      name:'', type:'', focus:'', gateTiming:'before', notes:'', tags:[], side:'both',
+      gatesSelected: new Array(18).fill(false),
+      numberOfGates: new Array(3).fill(false)
+    };
+    syncSessionSettingsUI();
+    render();
+    flash('Drill reset.');
   };
 
   // ---------- session settings ----------
@@ -2599,7 +2622,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     render();
   }
   function setControlsEnabled(on){
-    document.querySelectorAll('.tool-btn, .step-btn, .step-del, #addStepBtn, #resetDrillBtn, #sessionFieldsWrap').forEach(el=>{
+    document.querySelectorAll('.tool-btn, .step-btn, .step-del, #addStepBtn, #resetDrillBtn, #resetAllBtn, #sessionFieldsWrap').forEach(el=>{
       el.style.pointerEvents = on ? '' : 'none';
       el.style.opacity = on ? '' : '0.45';
     });
